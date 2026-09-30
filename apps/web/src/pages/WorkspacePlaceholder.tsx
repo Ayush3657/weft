@@ -1,4 +1,4 @@
-import { NotebookPen, Play } from 'lucide-react'
+import { NotebookPen } from 'lucide-react'
 import { navigate, projectPath } from '../lib/router'
 import { Button } from '../ui'
 
@@ -8,14 +8,9 @@ const COPY = {
     title: 'Write is coming next',
     body: 'Notes, the AV script (each row becomes a frame), the project bible with cast and locations, and the moodboard.',
   },
-  play: {
-    icon: Play,
-    title: 'Play is coming next',
-    body: 'Your cut as an animatic: the frame list on the left, the preview on the right, and a timeline with VO and music tracks.',
-  },
 } as const
 
-export function WorkspacePlaceholder({ workspace, projectId }: { workspace: 'write' | 'play'; projectId: string }) {
+export function WorkspacePlaceholder({ workspace, projectId }: { workspace: keyof typeof COPY; projectId: string }) {
   const { icon: Icon, title, body } = COPY[workspace]
   return (
     <div className="flex h-full items-center justify-center p-6">

@@ -27,6 +27,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Native file events on Windows sometimes miss quick successive writes,
+    // leaving the browser on stale code; polling the small source tree is reliable.
+    watch: process.platform === 'win32' ? { usePolling: true, interval: 250 } : undefined,
     proxy: {
       '/api': { target: server },
       '/sync': { target: server.replace(/^http/, 'ws'), ws: true },

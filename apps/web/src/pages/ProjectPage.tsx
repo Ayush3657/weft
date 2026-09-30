@@ -2,6 +2,7 @@ import { cutTimeline, formatSeconds } from '@weft/model'
 import { Check, ChevronDown, CloudOff, Copy, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Board } from '../board/Board'
+import { Play } from '../play/Play'
 import { cx } from '../lib/cx'
 import { usePref } from '../lib/prefs'
 import { navigate, projectPath, type Workspace } from '../lib/router'
@@ -82,7 +83,7 @@ function ProjectShell({ projectId, workspace }: { projectId: string; workspace: 
       <main className="min-h-0 flex-1">
         {workspace === 'board' && <Board cutId={cutId} />}
         {workspace === 'write' && <WorkspacePlaceholder workspace="write" projectId={projectId} />}
-        {workspace === 'play' && <WorkspacePlaceholder workspace="play" projectId={projectId} />}
+        {workspace === 'play' && <Play key={cutId} cutId={cutId} />}
       </main>
     </div>
   )
@@ -145,7 +146,7 @@ function CutPicker({ cutId, onChange }: { cutId: string; onChange: (cutId: strin
       <Menu
         header="Cuts are versions of the film, each taking its own path through the board."
         trigger={
-          <Button size="sm" variant="secondary" className="max-w-[200px]">
+          <Button size="sm" variant="secondary" className="max-w-[200px]" aria-label={`Cut: ${current?.name ?? 'Main cut'}`}>
             <span className="truncate">{current?.name ?? 'Main cut'}</span>
             <ChevronDown size={14} className="shrink-0 text-fg-3" aria-hidden />
           </Button>

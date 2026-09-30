@@ -310,7 +310,7 @@ function FrameInspector({
             {heroAsset ? (
               <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind, title: heroAsset.name }} controls />
             ) : (
-              <button type="button" onClick={mediaPicker.open} className="size-full">
+              <button type="button" onClick={mediaPicker.open} className="size-full" aria-label="Add an image or video">
                 <EmptyMedia />
               </button>
             )}

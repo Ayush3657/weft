@@ -26,7 +26,7 @@ async function hashFile(file: Blob): Promise<string> {
   return hasher.digest('hex')
 }
 
-interface MediaMeta {
+export interface MediaMeta {
   width?: number | null
   height?: number | null
   duration?: number | null
@@ -58,8 +58,12 @@ async function probe(file: File, kind: Exclude<AssetKind, 'link'>): Promise<Medi
   }
 }
 
-/** Uploads a file (skipping it if the server already has it) and adds it to the project's library. */
-export async function importFile(project: Project, file: File, userId: string): Promise<string> {
+/**
+ * Uploads a file (skipping it if the server already has it) and adds it to the
+ * project's library. `known` fills in what the file can't tell us, like the
+ * length of a fresh recording.
+ */
+export async function importFile(project: Project, file: File, userId: string, known: MediaMeta = {}): Promise<string> {
   const kind = fileKind(file.type)
   if (!kind) throw new Error(`${file.name || 'That file'} isn't an image, video or audio file`)
   const hash = await hashFile(file)
@@ -76,7 +80,12 @@ export async function importFile(project: Project, file: File, userId: string): 
       throw new Error(data.error ?? `Couldn't upload ${file.name}`)
     }
   }
-  const meta = await probe(file, kind)
+  const probed = await probe(file, kind)
+  const meta: MediaMeta = {
+    width: known.width ?? probed.width,
+    height: known.height ?? probed.height,
+    duration: known.duration ?? probed.duration,
+  }
   return project.addAsset({
     kind,
     hash,
