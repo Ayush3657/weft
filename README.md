@@ -26,8 +26,8 @@ npm run typecheck
 
 | Folder | What's in it |
 |---|---|
-| `packages/model` | The project data model: frames, links, variations, cuts, timing and shot numbering, stored in a Yjs document. Every edit goes through its commands. |
-| `apps/server` | HTTP API (`/api`), live sync (`/sync`, Hocuspocus) and media storage. SQLite database in `apps/server/data/`. |
+| `packages/model` | The project data model: frames, links, variations, cuts, timing and shot numbering, plus notes pages, the bible and the moodboard, stored in a Yjs document. Every edit goes through its commands. |
+| `apps/server` | HTTP API (`/api`), live sync (`/sync`, Hocuspocus), media storage and link previews. SQLite database in `apps/server/data/`. |
 | `apps/web` | The React app: projects list and the Write, Board and Play workspaces. |
 
 ## Data

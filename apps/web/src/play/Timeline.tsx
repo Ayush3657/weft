@@ -19,7 +19,8 @@ import {
   type RefObject,
 } from 'react'
 import { cx } from '../lib/cx'
-import { mediaUrl } from '../lib/media'
+import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
+import { mediaFiles, mediaUrl } from '../lib/media'
 import { useProject } from '../project/hooks'
 import { Button, IconButton, Kbd } from '../ui'
 import type { PlaybackClock } from './clock'
@@ -331,7 +332,24 @@ export function Timeline({
                 })}
               </div>
 
-              <div className="absolute inset-x-0 border-t border-line" style={{ top: TRACK.picture + TRACK.vo + TRACK.text, height: TRACK.music }}>
+              <div
+                className="absolute inset-x-0 border-t border-line"
+                style={{ top: TRACK.picture + TRACK.vo + TRACK.text, height: TRACK.music }}
+                onDragOver={(e) => {
+                  if (!isMediaDrag(e.dataTransfer)) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={(e) => {
+                  // An audio file, or a sound dragged from the Library, becomes this cut's music.
+                  const file = mediaFiles(e.dataTransfer).find((f) => f.type.startsWith('audio/'))
+                  const assetId = droppedAssetIds(e.dataTransfer).find((id) => s.assets[id]?.kind === 'audio')
+                  if (!file && !assetId) return
+                  e.preventDefault()
+                  if (file) onAddMusic(file)
+                  else if (assetId) project.setCutMusic(cutId, assetId)
+                }}
+              >
                 {music ? (
                   <div
                     onPointerDown={startMusicDrag}
@@ -349,7 +367,7 @@ export function Timeline({
                     onClick={() => musicInput.current?.click()}
                     className="absolute top-1 bottom-1 left-1 flex items-center gap-1.5 rounded border border-dashed border-line-strong px-2 text-[11px] text-fg-3 hover:text-fg-2"
                   >
-                    <Music size={11} aria-hidden /> Add a music track
+                    <Music size={11} aria-hidden /> Add a music track, or drop one here
                   </button>
                 )}
               </div>

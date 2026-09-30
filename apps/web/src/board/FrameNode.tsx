@@ -3,6 +3,7 @@ import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { ArrowLeftToLine, ArrowRightToLine, Check, Eye, EyeOff, GitBranchPlus, Plus, Trash2, Unlink } from 'lucide-react'
 import { memo, useEffect, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { cx } from '../lib/cx'
+import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { mediaFiles } from '../lib/media'
 import { BoundTextarea } from '../project/BoundText'
 import { useProjectContext } from '../project/ProjectProvider'
@@ -29,8 +30,6 @@ export interface FrameNodeData extends Record<string, unknown> {
 
 export type FrameNodeType = Node<FrameNodeData, 'frame'>
 
-const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes('Files')
-
 function Chip({ children, title }: { children: string; title: string }) {
   return (
     <span title={title} className="rounded border border-line px-1 py-px text-[10px] font-medium text-fg-2">
@@ -52,7 +51,7 @@ export const FrameNode = memo(function FrameNode({ id, data, selected }: NodePro
 
   const fileDropProps = (target: 'media' | 'references') => ({
     onDragOver: (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (!isMediaDrag(e.dataTransfer)) return
       e.preventDefault()
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'copy'
@@ -64,10 +63,12 @@ export const FrameNode = memo(function FrameNode({ id, data, selected }: NodePro
     onDrop: (e: DragEvent) => {
       setFileTarget(null)
       const files = mediaFiles(e.dataTransfer)
-      if (!files.length) return
+      const assetIds = droppedAssetIds(e.dataTransfer)
+      if (!files.length && !assetIds.length) return
       e.preventDefault()
       e.stopPropagation()
-      actions.importToFrame(id, files, target)
+      if (files.length) actions.importToFrame(id, files, target)
+      else actions.attachToFrame(id, assetIds, target)
     },
   })
 

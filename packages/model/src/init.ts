@@ -47,6 +47,7 @@ export function initProject(doc: Y.Doc, init: ProjectInit): { mainCutId: string;
     project.setCutTarget(mainCutId, targetDuration)
     project.meta.set('mainCutId', mainCutId)
     const firstFrameId = project.createFrame()
+    project.createPage('Notes', 'notes')
     return { mainCutId, firstFrameId }
   })
 }

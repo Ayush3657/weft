@@ -65,12 +65,16 @@ export function useUndoRedo() {
   }
 }
 
-/** Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl+Y to redo, everywhere in the project (text included). */
+/**
+ * Ctrl/Cmd+Z to undo, Ctrl/Cmd+Shift+Z or Ctrl+Y to redo, everywhere in the
+ * project (text included). The notes editor keeps its own history per page.
+ */
 export function useUndoShortcuts(): void {
   const { undo } = useProjectContext()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      if (e.target instanceof Element && e.target.closest('.ProseMirror')) return
       const key = e.key.toLowerCase()
       if (key === 'z' && !e.shiftKey) {
         e.preventDefault()

@@ -13,6 +13,7 @@ import {
   spokenSeconds,
   voWordCount,
   type AudioKind,
+  type BibleEntrySnapshot,
   type CameraAngle,
   type CameraMove,
   type FrameSnapshot,
@@ -20,14 +21,20 @@ import {
   type ShotSize,
   type TransitionType,
 } from '@weft/model'
-import { ArrowRight, GitBranchPlus, ImagePlus, Plus, Trash2, Unlink, X } from 'lucide-react'
-import { useEffect, useRef, useState, type ChangeEvent, type InputHTMLAttributes, type ReactNode } from 'react'
+import { ArrowRight, BookOpen, GitBranchPlus, ImagePlus, Plus, Trash2, Unlink, X } from 'lucide-react'
+import type { DragEvent, ReactNode } from 'react'
+import { attachToFrame } from '../lib/attach'
 import { useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
+import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { importFiles, mediaFiles } from '../lib/media'
+import { navigate, writePath } from '../lib/router'
 import { BoundTextarea } from '../project/BoundText'
 import { useProject, useSnapshot } from '../project/hooks'
-import { Button, Field, IconButton, Input, Kbd, Segmented, Select, textareaClass } from '../ui'
+import { useProjectContext } from '../project/ProjectProvider'
+import { Button, Field, IconButton, Kbd, Menu, Segmented, Select, textareaClass } from '../ui'
+import { CommitInput, SecondsInput, Thumb, useFilePicker } from '../ui/inputs'
+import { EntryAvatar, BibleIcon, bibleOrder, entryName } from '../write/bible-kinds'
 import { EmptyMedia, MediaFill } from './Media'
 
 export function Inspector({
@@ -74,149 +81,6 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   )
 }
 
-/** A text input that edits locally and saves on blur or Enter. */
-function CommitInput({
-  value,
-  onCommit,
-  ...rest
-}: { value: string; onCommit: (value: string) => void } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
-  const [draft, setDraft] = useState(value)
-  const focused = useRef(false)
-  useEffect(() => {
-    if (!focused.current) setDraft(value)
-  }, [value])
-  return (
-    <Input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => (focused.current = true)}
-      onBlur={() => {
-        focused.current = false
-        if (draft !== value) onCommit(draft)
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
-        if (e.key === 'Escape') {
-          setDraft(value)
-          requestAnimationFrame(() => e.currentTarget?.blur())
-        }
-      }}
-      {...rest}
-    />
-  )
-}
-
-/** Seconds input; empty means "none" when `allowEmpty`. */
-function SecondsInput({
-  value,
-  onCommit,
-  allowEmpty = false,
-  placeholder,
-  className,
-  label,
-}: {
-  value: number | null
-  onCommit: (value: number | null) => void
-  allowEmpty?: boolean
-  placeholder?: string
-  className?: string
-  label: string
-}) {
-  const format = (v: number | null) => (v === null ? '' : String(Math.round(v * 100) / 100))
-  const [draft, setDraft] = useState(format(value))
-  const focused = useRef(false)
-  useEffect(() => {
-    if (!focused.current) setDraft(format(value))
-  }, [value])
-  const commit = () => {
-    const trimmed = draft.trim()
-    if (!trimmed) {
-      if (allowEmpty) onCommit(null)
-      else setDraft(format(value))
-      return
-    }
-    const parsed = Number(trimmed.replace(',', '.'))
-    if (Number.isFinite(parsed) && parsed > 0) onCommit(parsed)
-    else setDraft(format(value))
-  }
-  return (
-    <Input
-      aria-label={label}
-      inputMode="decimal"
-      value={draft}
-      placeholder={placeholder}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => (focused.current = true)}
-      onBlur={() => {
-        focused.current = false
-        commit()
-      }}
-      onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-      className={cx('tabular-nums', className)}
-    />
-  )
-}
-
-function Thumb({
-  media,
-  active,
-  onClick,
-  onRemove,
-  label,
-}: {
-  media: { hash: string | null; kind: 'image' | 'video' | 'audio' | 'link'; title?: string }
-  active?: boolean
-  onClick?: () => void
-  onRemove?: () => void
-  label: string
-}) {
-  return (
-    <div className="group/thumb relative">
-      <button
-        type="button"
-        onClick={onClick}
-        aria-label={label}
-        title={label}
-        className={cx(
-          'block aspect-square w-full overflow-hidden rounded-md border bg-media',
-          active ? 'border-accent ring-2 ring-accent-soft' : 'border-line hover:border-line-strong',
-        )}
-      >
-        <MediaFill media={media} />
-      </button>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={`Remove ${label}`}
-          className="absolute -top-1.5 -right-1.5 hidden size-5 items-center justify-center rounded-full border border-line-strong bg-panel text-fg-2 group-hover/thumb:flex hover:text-danger"
-        >
-          <X size={11} />
-        </button>
-      )}
-    </div>
-  )
-}
-
-function useFilePicker(onFiles: (files: File[]) => void, accept = 'image/*,video/*') {
-  const ref = useRef<HTMLInputElement>(null)
-  const input = (
-    <input
-      ref={ref}
-      type="file"
-      multiple
-      accept={accept}
-      className="hidden"
-      onChange={(e: ChangeEvent<HTMLInputElement>) => {
-        const files = [...(e.target.files ?? [])]
-        e.target.value = ''
-        if (files.length) onFiles(files)
-      }}
-    />
-  )
-  return { open: () => ref.current?.click(), input }
-}
-
 // ------------------------------------------------------------------ frame
 
 const STATUS_OPTIONS: ReadonlyArray<{ id: FrameStatus; label: string }> = [
@@ -250,6 +114,21 @@ function FrameInspector({
   }
   const mediaPicker = useFilePicker((files) => void addMedia(files))
   const refPicker = useFilePicker((files) => void addRefs(files), 'image/*,video/*,audio/*')
+  const dropZone = (target: 'media' | 'references') => ({
+    onDragOver: (e: DragEvent) => {
+      if (!isMediaDrag(e.dataTransfer)) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    },
+    onDrop: (e: DragEvent) => {
+      const files = mediaFiles(e.dataTransfer)
+      const assetIds = droppedAssetIds(e.dataTransfer)
+      if (!files.length && !assetIds.length) return
+      e.preventDefault()
+      if (files.length) void (target === 'media' ? addMedia(files) : addRefs(files))
+      else attachToFrame(project, frameId, assetIds, target)
+    },
+  })
 
   const hero = frame.media.find((m) => m.id === frame.heroMediaId)
   const heroAsset = hero ? s.assets[hero.assetId] : undefined
@@ -299,13 +178,7 @@ function FrameInspector({
           <div
             className="overflow-hidden rounded-lg border border-line bg-media"
             style={{ aspectRatio: s.meta.aspect.replace(':', ' / ') }}
-            onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
-            onDrop={(e) => {
-              const files = mediaFiles(e.dataTransfer)
-              if (!files.length) return
-              e.preventDefault()
-              void addMedia(files)
-            }}
+            {...dropZone('media')}
           >
             {heroAsset ? (
               <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind, title: heroAsset.name }} controls />
@@ -359,6 +232,8 @@ function FrameInspector({
             className={textareaClass}
           />
         </Field>
+
+        <TagsSection frame={frame} />
 
         <Section title="Camera">
           <Segmented<ShotSize>
@@ -423,16 +298,7 @@ function FrameInspector({
             </Button>
           }
         >
-          <div
-            className="rounded-lg border border-dashed border-line p-2"
-            onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
-            onDrop={(e) => {
-              const files = mediaFiles(e.dataTransfer)
-              if (!files.length) return
-              e.preventDefault()
-              void addRefs(files)
-            }}
-          >
+          <div className="rounded-lg border border-dashed border-line p-2" {...dropZone('references')}>
             {frame.references.length ? (
               <div className="grid grid-cols-4 gap-1.5">
                 {frame.references.map((id) => {
@@ -486,6 +352,71 @@ function FrameInspector({
   )
 }
 
+/** Bible entries (cast, locations, products) tagged in this frame. */
+function TagsSection({ frame }: { frame: FrameSnapshot }) {
+  const s = useSnapshot()
+  const project = useProject()
+  const { projectId } = useProjectContext()
+  const entries = Object.values(s.bible).sort(bibleOrder)
+  const tagged = frame.tags.map((id) => s.bible[id]).filter((e): e is BibleEntrySnapshot => e !== undefined)
+  const untagged = entries.filter((e) => !frame.tags.includes(e.id))
+  const openBible = () => navigate(writePath(projectId, { section: 'bible', pageId: null }))
+  return (
+    <Section
+      title="In this shot"
+      action={
+        entries.length > 0 && (
+          <Menu
+            trigger={
+              <Button size="sm" variant="ghost" icon={<Plus size={14} />}>
+                Tag
+              </Button>
+            }
+            items={[
+              ...untagged.map((e) => ({
+                label: entryName(e),
+                icon: <BibleIcon kind={e.kind} size={14} />,
+                onSelect: () => project.toggleFrameTag(frame.id, e.id),
+              })),
+              ...(untagged.length ? (['separator'] as const) : []),
+              { label: 'Open the bible', icon: <BookOpen size={14} />, onSelect: openBible },
+            ]}
+          />
+        )
+      }
+    >
+      {tagged.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {tagged.map((entry) => (
+            <span key={entry.id} className="flex h-7 items-center gap-1.5 rounded-full border border-line bg-bg pr-1 pl-1">
+              <EntryAvatar entry={entry} s={s} />
+              <span className="max-w-[140px] truncate text-[12px] text-fg">{entryName(entry)}</span>
+              <button
+                type="button"
+                onClick={() => project.toggleFrameTag(frame.id, entry.id)}
+                aria-label={`Untag ${entryName(entry)}`}
+                className="flex size-5 items-center justify-center rounded-full text-fg-3 hover:bg-hover hover:text-fg"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : entries.length > 0 ? (
+        <p className="text-[12px] text-fg-3">Tag the characters, locations and products this shot needs.</p>
+      ) : (
+        <p className="text-[12px] text-fg-3">
+          Add your cast, locations and products in the{' '}
+          <button type="button" onClick={openBible} className="text-accent-strong hover:underline">
+            bible
+          </button>
+          , then tag them here.
+        </p>
+      )}
+    </Section>
+  )
+}
+
 function AudioSection({ frame }: { frame: FrameSnapshot }) {
   const project = useProject()
   const s = useSnapshot()
@@ -526,7 +457,7 @@ function AudioSection({ frame }: { frame: FrameSnapshot }) {
                 aria-label="Line type"
                 value={line.kind}
                 onChange={(e) => project.updateAudioLine(frame.id, line.id, { kind: e.target.value as AudioKind })}
-                className="h-7 w-[104px] text-[12px]"
+                className="h-7 w-[118px] text-[12px]"
               >
                 <option value="vo">Voiceover</option>
                 <option value="dialogue">Dialogue</option>

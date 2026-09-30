@@ -12,6 +12,8 @@ export interface BoardActions {
   selectLink(linkId: string): void
   cutLink(linkId: string): void
   importToFrame(frameId: string, files: File[], target: 'media' | 'references'): void
+  /** Library assets dropped on a frame. */
+  attachToFrame(frameId: string, assetIds: string[], target: 'media' | 'references'): void
 }
 
 export const BoardActionsContext = createContext<BoardActions | null>(null)
@@ -43,4 +45,17 @@ export function focusFrameText(frameId: string): void {
 /** Called by a frame card when it mounts; focuses it if focus was requested before it existed. */
 export function claimPendingFocus(frameId: string): void {
   if (pendingFocus === frameId && focusElement(frameId)) pendingFocus = null
+}
+
+let pendingReveal: string | null = null
+
+/** Asks the board to select and show a frame when it next opens (from Write or the Library). */
+export function revealOnBoard(frameId: string): void {
+  pendingReveal = frameId
+}
+
+export function takeReveal(): string | null {
+  const id = pendingReveal
+  pendingReveal = null
+  return id
 }

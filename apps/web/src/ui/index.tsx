@@ -282,7 +282,7 @@ export function ContextMenuArea({ items, children }: { items: Array<MenuItem | '
               <ContextMenu.Separator key={`sep-${i}`} className="my-1 h-px bg-line" />
             ) : (
               <ContextMenu.Item
-                key={item.label}
+                key={`${i}:${item.label}`}
                 disabled={item.disabled}
                 onSelect={() => window.setTimeout(item.onSelect, 0)}
                 className={cx(menuItemClass, item.danger ? 'text-danger' : 'text-fg')}
@@ -319,7 +319,7 @@ export function Menu({
               <DropdownMenu.Separator key={`sep-${i}`} className="my-1 h-px bg-line" />
             ) : (
               <DropdownMenu.Item
-                key={item.label}
+                key={`${i}:${item.label}`}
                 disabled={item.disabled}
                 // Run after the menu has closed and handed focus back, so an action
                 // that opens a dialog isn't immediately closed by that focus change.

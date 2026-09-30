@@ -22,6 +22,7 @@ import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
 import { createProject, docName, getProject, listProjects, softDeleteProject } from './projects'
 import { hocuspocus } from './sync'
+import { UnfurlError, unfurl } from './unfurl'
 
 type Env = { Variables: { user: PublicUser | null } }
 
@@ -29,6 +30,7 @@ export const app = new Hono<Env>()
 
 app.onError((err, c) => {
   if (err instanceof UploadError) return c.json({ error: err.message }, err.status)
+  if (err instanceof UnfurlError) return c.json({ error: err.message }, err.status)
   log.error(`${c.req.method} ${c.req.path} failed`, err)
   return c.json({ error: 'Something went wrong on the server' }, 500)
 })
@@ -155,6 +157,14 @@ app.get('/api/media/:hash', requireUser, (c) => {
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox")
   return response
+})
+
+// --------------------------------------------------------- link previews
+
+app.get('/api/unfurl', requireUser, async (c) => {
+  const url = c.req.query('url')
+  if (!url) return c.json({ error: 'Add a link to preview' }, 400)
+  return c.json({ preview: await unfurl(url) })
 })
 
 // --------------------------------------------------------- access tokens

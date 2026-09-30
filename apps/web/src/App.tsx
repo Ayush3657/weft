@@ -1,5 +1,5 @@
 import { AuthProvider, useAuth } from './lib/auth'
-import { navigate, parseRoute, usePathname } from './lib/router'
+import { navigate, parseRoute, useLocation } from './lib/router'
 import { Toaster } from './lib/toast'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectPage } from './pages/ProjectPage'
@@ -8,7 +8,7 @@ import { Button, FullScreenMessage, Spinner, TooltipProvider } from './ui'
 
 function Routes() {
   const { status, retry } = useAuth()
-  const route = parseRoute(usePathname())
+  const route = parseRoute(useLocation())
   if (status === 'loading') {
     return (
       <FullScreenMessage>
@@ -34,7 +34,7 @@ function Routes() {
     case 'projects':
       return <ProjectsPage />
     case 'project':
-      return <ProjectPage projectId={route.projectId} workspace={route.workspace} />
+      return <ProjectPage projectId={route.projectId} workspace={route.workspace} write={route.write} popout={route.popout} />
     case 'not-found':
       return (
         <FullScreenMessage>

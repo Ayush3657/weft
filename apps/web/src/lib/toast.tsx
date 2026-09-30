@@ -3,10 +3,16 @@ import { useSyncExternalStore } from 'react'
 import { cx } from './cx'
 
 type Tone = 'info' | 'error' | 'ok'
+export interface ToastAction {
+  label: string
+  run: () => void
+}
+
 interface Toast {
   id: number
   message: string
   tone: Tone
+  action?: ToastAction
 }
 
 let toasts: Toast[] = []
@@ -21,11 +27,11 @@ export function dismissToast(id: number): void {
   emit()
 }
 
-export function toast(message: string, tone: Tone = 'info'): void {
+export function toast(message: string, tone: Tone = 'info', action?: ToastAction): void {
   const id = nextId++
-  toasts = [...toasts.filter((t) => t.message !== message), { id, message, tone }].slice(-4)
+  toasts = [...toasts.filter((t) => t.message !== message), { id, message, tone, action }].slice(-4)
   emit()
-  setTimeout(() => dismissToast(id), tone === 'error' ? 6000 : 3500)
+  setTimeout(() => dismissToast(id), tone === 'error' ? 6000 : action ? 6000 : 3500)
 }
 
 export function toastError(error: unknown, fallback = 'Something went wrong'): void {
@@ -59,6 +65,17 @@ export function Toaster() {
               aria-hidden
             />
             <span className="text-fg">{t.message}</span>
+            {t.action && (
+              <button
+                className="rounded px-1.5 py-0.5 font-medium text-accent-strong hover:bg-hover"
+                onClick={() => {
+                  dismissToast(t.id)
+                  t.action!.run()
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
               className="rounded p-1 text-fg-3 hover:bg-hover hover:text-fg"
               onClick={() => dismissToast(t.id)}

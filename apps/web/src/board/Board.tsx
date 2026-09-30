@@ -29,14 +29,16 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { attachToFrame, pictureAssets } from '../lib/attach'
 import { useUser } from '../lib/auth'
+import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { importFiles, mediaFiles } from '../lib/media'
 import { useTheme } from '../lib/prefs'
 import { toast, toastError } from '../lib/toast'
 import { useSnapshot, useUndoRedo } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, IconButton, Kbd } from '../ui'
-import { BoardActionsContext, focusFrameText, type BoardActions } from './actions'
+import { BoardActionsContext, focusFrameText, takeReveal, type BoardActions } from './actions'
 import { FrameNode, type FrameNodeData, type FrameNodeType } from './FrameNode'
 import { Inspector } from './Inspector'
 import { stripLayout, type Point } from './layout'
@@ -349,10 +351,10 @@ function BoardView({ cutId }: { cutId: string }) {
     [project, user.id],
   )
 
-  /** Each file becomes a new frame at the end of the cut. */
-  const framesFromFiles = useCallback(
-    async (files: File[], at?: Point) => {
-      const ids = await importFiles(project, files, user.id)
+  /** Each image or video becomes a new frame at the end of the cut. */
+  const framesFromAssets = useCallback(
+    (assetIds: string[], at?: Point) => {
+      const ids = pictureAssets(project, assetIds)
       if (!ids.length) return
       let last: string | null = null
       project.transact(() => {
@@ -365,8 +367,19 @@ function BoardView({ cutId }: { cutId: string }) {
       })
       if (last) selectFrame(last)
     },
-    [project, user.id, cutId, size, selectFrame],
+    [project, cutId, size, selectFrame],
   )
+
+  const framesFromFiles = useCallback(
+    async (files: File[], at?: Point) => framesFromAssets(await importFiles(project, files, user.id), at),
+    [project, user.id, framesFromAssets],
+  )
+
+  // Opened from Write or the Library to show a particular frame.
+  useEffect(() => {
+    const frameId = takeReveal()
+    if (frameId && project.getFrame(frameId)) selectFrame(frameId)
+  }, [project, selectFrame])
 
   const actions: BoardActions = useMemo(
     () => ({
@@ -385,6 +398,7 @@ function BoardView({ cutId }: { cutId: string }) {
       },
       cutLink,
       importToFrame: (frameId, files, target) => void importToFrame(frameId, files, target),
+      attachToFrame: (frameId, assetIds, target) => attachToFrame(project, frameId, assetIds, target),
     }),
     [insertAfter, insertBefore, addVariation, project, cutId, cutLink, importToFrame],
   )
@@ -655,16 +669,18 @@ function BoardView({ cutId }: { cutId: string }) {
   }, [selectedFrameIds, insertAfter, addVariation, importToFrame, framesFromFiles])
 
   const onPaneDragOver = (e: DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return
+    if (!isMediaDrag(e.dataTransfer)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
   }
   const onPaneDrop = (e: DragEvent) => {
     const files = mediaFiles(e.dataTransfer)
-    if (!files.length) return
+    const assetIds = droppedAssetIds(e.dataTransfer)
+    if (!files.length && !assetIds.length) return
     e.preventDefault()
     const at = auto ? undefined : flow.screenToFlowPosition({ x: e.clientX, y: e.clientY })
-    void framesFromFiles(files, at)
+    if (files.length) void framesFromFiles(files, at)
+    else framesFromAssets(assetIds, at)
   }
 
   const onlyFrame = frameList.length === 1 ? frameList[0] : undefined

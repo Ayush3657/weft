@@ -12,12 +12,18 @@ import {
   SCENE_COLORS,
   SHOT_SIZES,
   TRANSITIONS,
+  BIBLE_KINDS,
+  MOOD_ITEM_KINDS,
   type AssetSnapshot,
   type AudioLine,
+  type BibleEntrySnapshot,
+  type BriefSnapshot,
   type CutSnapshot,
   type FrameSnapshot,
   type LinkSnapshot,
   type MediaVersion,
+  type MoodItemSnapshot,
+  type PageSnapshot,
   type ProjectMeta,
   type ProjectSnapshot,
   type SceneSnapshot,
@@ -32,6 +38,10 @@ export interface ProjectRoots {
   readonly cuts: Y.Map<YMap>
   readonly scenes: Y.Map<YMap>
   readonly assets: Y.Map<YMap>
+  readonly bible: Y.Map<YMap>
+  readonly brief: YMap
+  readonly pages: Y.Map<YMap>
+  readonly moodboard: Y.Map<YMap>
 }
 
 export const DEFAULT_WORDS_PER_SECOND = 2.5
@@ -211,8 +221,49 @@ export function readAsset(m: YMap): AssetSnapshot {
     duration: optNum(m.get('duration')),
     url: optStr(m.get('url')),
     title: str(m.get('title')),
+    preview: optStr(m.get('preview')),
+    site: str(m.get('site')),
     createdAt: num(m.get('createdAt')),
     createdBy: optStr(m.get('createdBy')),
+  }
+}
+
+export function readBibleEntry(m: YMap): BibleEntrySnapshot {
+  return {
+    id: str(m.get('id')),
+    kind: oneOf(m.get('kind'), BIBLE_KINDS, 'character'),
+    name: str(m.get('name')),
+    description: text(m.get('description')),
+    assetIds: strings(m.get('assetIds')),
+    createdAt: num(m.get('createdAt')),
+  }
+}
+
+export function readBrief(m: YMap): BriefSnapshot {
+  return {
+    logline: text(m.get('logline')),
+    audience: text(m.get('audience')),
+    tone: text(m.get('tone')),
+    styleRefs: strings(m.get('styleRefs')),
+  }
+}
+
+export function readPage(m: YMap): PageSnapshot {
+  return { id: str(m.get('id')), title: str(m.get('title')), createdAt: num(m.get('createdAt')) }
+}
+
+export function readMoodItem(m: YMap): MoodItemSnapshot {
+  return {
+    id: str(m.get('id')),
+    kind: oneOf(m.get('kind'), MOOD_ITEM_KINDS, 'note'),
+    assetId: optStr(m.get('assetId')),
+    text: text(m.get('text')),
+    color: str(m.get('color'), '#f2c14e'),
+    x: num(m.get('x')),
+    y: num(m.get('y')),
+    w: num(m.get('w'), 240),
+    h: num(m.get('h'), 180),
+    createdAt: num(m.get('createdAt')),
   }
 }
 
@@ -230,5 +281,9 @@ export function buildSnapshot(r: ProjectRoots): ProjectSnapshot {
     cuts: readAll(r.cuts, readCut),
     scenes: readAll(r.scenes, readScene),
     assets: readAll(r.assets, readAsset),
+    bible: readAll(r.bible, readBibleEntry),
+    brief: readBrief(r.brief),
+    pages: readAll(r.pages, readPage),
+    moodboard: readAll(r.moodboard, readMoodItem),
   }
 }

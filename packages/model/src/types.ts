@@ -204,8 +204,54 @@ export interface AssetSnapshot {
   duration: number | null
   url: string | null
   title: string
+  /** Links: preview image (remote URL) and site name, from the page's metadata. */
+  preview: string | null
+  site: string
   createdAt: number
   createdBy: string | null
+}
+
+export type BibleKind = 'character' | 'location' | 'product'
+export const BIBLE_KINDS: readonly BibleKind[] = ['character', 'location', 'product']
+
+export interface BibleEntrySnapshot {
+  id: string
+  kind: BibleKind
+  name: string
+  description: string
+  assetIds: string[]
+  createdAt: number
+}
+
+export interface BriefSnapshot {
+  logline: string
+  audience: string
+  tone: string
+  styleRefs: string[]
+}
+
+export interface PageSnapshot {
+  id: string
+  title: string
+  createdAt: number
+}
+
+export type MoodItemKind = 'asset' | 'note' | 'color' | 'section'
+export const MOOD_ITEM_KINDS: readonly MoodItemKind[] = ['asset', 'note', 'color', 'section']
+
+export interface MoodItemSnapshot {
+  id: string
+  kind: MoodItemKind
+  assetId: string | null
+  /** Notes: the note's text. Sections: their title. */
+  text: string
+  /** Colour swatches and notes: a hex colour. */
+  color: string
+  x: number
+  y: number
+  w: number
+  h: number
+  createdAt: number
 }
 
 export interface ProjectSnapshot {
@@ -215,4 +261,8 @@ export interface ProjectSnapshot {
   cuts: Readonly<Record<string, CutSnapshot>>
   scenes: Readonly<Record<string, SceneSnapshot>>
   assets: Readonly<Record<string, AssetSnapshot>>
+  bible: Readonly<Record<string, BibleEntrySnapshot>>
+  brief: BriefSnapshot
+  pages: Readonly<Record<string, PageSnapshot>>
+  moodboard: Readonly<Record<string, MoodItemSnapshot>>
 }

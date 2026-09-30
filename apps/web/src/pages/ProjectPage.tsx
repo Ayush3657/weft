@@ -1,18 +1,38 @@
 import { cutTimeline, formatSeconds } from '@weft/model'
-import { Check, ChevronDown, CloudOff, Copy, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Check, ChevronDown, CloudOff, Copy, Library as LibraryIcon, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Board } from '../board/Board'
-import { Play } from '../play/Play'
+import { Library } from '../library/Library'
 import { cx } from '../lib/cx'
 import { usePref } from '../lib/prefs'
-import { navigate, projectPath, type Workspace } from '../lib/router'
+import { navigate, projectPath, type Workspace, type WriteLocation } from '../lib/router'
 import { useProject, useSnapshot, useSyncStatus, useUndoShortcuts } from '../project/hooks'
 import { ProjectProvider } from '../project/ProjectProvider'
-import { AppHeader } from '../shell/Shell'
-import { Button, Field, FullScreenMessage, Input, Menu, Modal, Spinner } from '../ui'
-import { WorkspacePlaceholder } from './WorkspacePlaceholder'
+import { AppHeader, LogoMark } from '../shell/Shell'
+import { Button, Field, FullScreenMessage, IconButton, Input, Kbd, Menu, Modal, Spinner } from '../ui'
 
-export function ProjectPage({ projectId, workspace }: { projectId: string; workspace: Workspace }) {
+// Write (with the notes editor) and Play load when first opened.
+const Write = lazy(() => import('../write/Write').then((m) => ({ default: m.Write })))
+const Moodboard = lazy(() => import('../write/Moodboard').then((m) => ({ default: m.Moodboard })))
+const Play = lazy(() => import('../play/Play').then((m) => ({ default: m.Play })))
+
+const loadingWorkspace = (
+  <div className="flex h-full items-center justify-center">
+    <Spinner />
+  </div>
+)
+
+export function ProjectPage({
+  projectId,
+  workspace,
+  write,
+  popout,
+}: {
+  projectId: string
+  workspace: Workspace
+  write: WriteLocation | null
+  popout: boolean
+}) {
   return (
     <ProjectProvider
       key={projectId}
@@ -36,16 +56,69 @@ export function ProjectPage({ projectId, workspace }: { projectId: string; works
         </FullScreenMessage>
       )}
     >
-      <ProjectShell projectId={projectId} workspace={workspace} />
+      {popout && workspace === 'write' && write?.section === 'moodboard' ? (
+        <MoodboardWindow projectId={projectId} />
+      ) : (
+        <ProjectShell projectId={projectId} workspace={workspace} write={write} />
+      )}
     </ProjectProvider>
   )
 }
 
-function ProjectShell({ projectId, workspace }: { projectId: string; workspace: Workspace }) {
+function useCutId(projectId: string): [string, (cutId: string | null) => void] {
   const s = useSnapshot()
   const [savedCut, setSavedCut] = usePref(`cut:${projectId}`)
-  const cutId = savedCut && s.cuts[savedCut] ? savedCut : s.meta.mainCutId
+  return [savedCut && s.cuts[savedCut] ? savedCut : s.meta.mainCutId, setSavedCut]
+}
+
+const isTyping = (target: EventTarget | null) =>
+  target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable="true"], .ProseMirror')
+
+/** The moodboard on its own, for a second screen. */
+function MoodboardWindow({ projectId }: { projectId: string }) {
+  const s = useSnapshot()
+  const [cutId] = useCutId(projectId)
   useUndoShortcuts()
+  useEffect(() => {
+    document.title = `Moodboard · ${s.meta.title || 'Untitled'} · Weft`
+  }, [s.meta.title])
+  return (
+    <div className="flex h-full flex-col">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
+        <LogoMark size={18} />
+        <span className="truncate font-medium text-fg">{s.meta.title || 'Untitled'}</span>
+        <span className="text-fg-3">· Moodboard</span>
+        <span className="ml-auto">
+          <SyncIndicator />
+        </span>
+      </header>
+      <main className="min-h-0 flex-1">
+        <Suspense fallback={loadingWorkspace}>
+          <Moodboard cutId={cutId} popout />
+        </Suspense>
+      </main>
+    </div>
+  )
+}
+
+function ProjectShell({ projectId, workspace, write }: { projectId: string; workspace: Workspace; write: WriteLocation | null }) {
+  const s = useSnapshot()
+  const [cutId, setSavedCut] = useCutId(projectId)
+  const [libraryPref, setLibraryPref] = usePref('library')
+  const libraryOpen = libraryPref === '1'
+  useUndoShortcuts()
+
+  // L opens and closes the Library, anywhere but in a text field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'l' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || isTyping(e.target)) return
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return
+      e.preventDefault()
+      setLibraryPref(libraryOpen ? null : '1')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [libraryOpen, setLibraryPref])
 
   useEffect(() => {
     document.title = `${s.meta.title || 'Untitled'} · Weft`
@@ -77,13 +150,31 @@ function ProjectShell({ projectId, workspace }: { projectId: string; workspace: 
         <div className="flex items-center gap-2">
           <CutPicker cutId={cutId} onChange={setSavedCut} />
           <LengthMeter cutId={cutId} />
+          <IconButton
+            label={libraryOpen ? 'Close the Library' : 'Open the Library'}
+            tooltip={
+              <span>
+                Library: every picture, video, sound and link <Kbd>L</Kbd>
+              </span>
+            }
+            active={libraryOpen}
+            aria-pressed={libraryOpen}
+            onClick={() => setLibraryPref(libraryOpen ? null : '1')}
+          >
+            <LibraryIcon size={16} />
+          </IconButton>
           <SyncIndicator />
         </div>
       </AppHeader>
-      <main className="min-h-0 flex-1">
-        {workspace === 'board' && <Board cutId={cutId} />}
-        {workspace === 'write' && <WorkspacePlaceholder workspace="write" projectId={projectId} />}
-        {workspace === 'play' && <Play key={cutId} cutId={cutId} />}
+      <main className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1">
+          <Suspense fallback={loadingWorkspace}>
+            {workspace === 'board' && <Board cutId={cutId} />}
+            {workspace === 'write' && <Write location={write} cutId={cutId} />}
+            {workspace === 'play' && <Play key={cutId} cutId={cutId} />}
+          </Suspense>
+        </div>
+        {libraryOpen && <Library onClose={() => setLibraryPref(null)} />}
       </main>
     </div>
   )

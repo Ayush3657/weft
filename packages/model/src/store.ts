@@ -1,6 +1,19 @@
 import type * as Y from 'yjs'
 import type { Project } from './project'
-import { buildSnapshot, readAsset, readCut, readFrame, readLink, readMeta, readScene, type YMap } from './read'
+import {
+  buildSnapshot,
+  readAsset,
+  readBibleEntry,
+  readBrief,
+  readCut,
+  readFrame,
+  readLink,
+  readMeta,
+  readMoodItem,
+  readPage,
+  readScene,
+  type YMap,
+} from './read'
 import type { ProjectSnapshot } from './types'
 
 type Listener = () => void
@@ -20,10 +33,15 @@ function patchRecord<T>(
   return next
 }
 
+type Collection = 'frames' | 'links' | 'cuts' | 'scenes' | 'assets' | 'bible' | 'pages' | 'moodboard'
+
 /**
  * Keeps an immutable snapshot of a project up to date. Frames, links and other
  * items that didn't change keep their object identity between snapshots, so
  * UIs can skip re-rendering them. Works with React's useSyncExternalStore.
+ *
+ * Notes page content isn't part of the snapshot: the editor binds to it
+ * directly, so typing a note doesn't rebuild anything here.
  */
 export class SnapshotStore {
   readonly project: Project
@@ -32,28 +50,24 @@ export class SnapshotStore {
   private readonly cleanups: Array<() => void> = []
   private scheduled = false
   private metaDirty = false
-  private readonly dirty = {
-    frames: new Set<string>(),
-    links: new Set<string>(),
-    cuts: new Set<string>(),
-    scenes: new Set<string>(),
-    assets: new Set<string>(),
+  private briefDirty = false
+  private readonly dirty: Record<Collection, Set<string>> = {
+    frames: new Set(),
+    links: new Set(),
+    cuts: new Set(),
+    scenes: new Set(),
+    assets: new Set(),
+    bible: new Set(),
+    pages: new Set(),
+    moodboard: new Set(),
   }
 
   constructor(project: Project) {
     this.project = project
     this.current = buildSnapshot(project)
-    this.watch(project.frames, this.dirty.frames)
-    this.watch(project.links, this.dirty.links)
-    this.watch(project.cuts, this.dirty.cuts)
-    this.watch(project.scenes, this.dirty.scenes)
-    this.watch(project.assets, this.dirty.assets)
-    const onMeta = () => {
-      this.metaDirty = true
-      this.schedule()
-    }
-    project.meta.observeDeep(onMeta)
-    this.cleanups.push(() => project.meta.unobserveDeep(onMeta))
+    for (const name of Object.keys(this.dirty) as Collection[]) this.watch(project[name], this.dirty[name])
+    this.watchWhole(project.meta, () => (this.metaDirty = true))
+    this.watchWhole(project.brief, () => (this.briefDirty = true))
   }
 
   getSnapshot = (): ProjectSnapshot => this.current
@@ -69,28 +83,30 @@ export class SnapshotStore {
   flush = (): void => {
     this.scheduled = false
     const { project: p, dirty } = this
-    const changed =
-      this.metaDirty ||
-      dirty.frames.size > 0 ||
-      dirty.links.size > 0 ||
-      dirty.cuts.size > 0 ||
-      dirty.scenes.size > 0 ||
-      dirty.assets.size > 0
+    const changed = this.metaDirty || this.briefDirty || Object.values(dirty).some((ids) => ids.size > 0)
     if (!changed) return
     const prev = this.current
-    const read = <T>(map: Y.Map<YMap>, reader: (m: YMap) => T) => (id: string) => {
-      const m = map.get(id)
-      return m ? reader(m) : undefined
-    }
+    const patch = <T>(name: Collection, reader: (m: YMap) => T, before: Readonly<Record<string, T>>) =>
+      dirty[name].size
+        ? patchRecord(before, dirty[name], (id) => {
+            const m = p[name].get(id)
+            return m ? reader(m) : undefined
+          })
+        : before
     this.current = {
       meta: this.metaDirty ? readMeta(p.meta) : prev.meta,
-      frames: dirty.frames.size ? patchRecord(prev.frames, dirty.frames, read(p.frames, readFrame)) : prev.frames,
-      links: dirty.links.size ? patchRecord(prev.links, dirty.links, read(p.links, readLink)) : prev.links,
-      cuts: dirty.cuts.size ? patchRecord(prev.cuts, dirty.cuts, read(p.cuts, readCut)) : prev.cuts,
-      scenes: dirty.scenes.size ? patchRecord(prev.scenes, dirty.scenes, read(p.scenes, readScene)) : prev.scenes,
-      assets: dirty.assets.size ? patchRecord(prev.assets, dirty.assets, read(p.assets, readAsset)) : prev.assets,
+      brief: this.briefDirty ? readBrief(p.brief) : prev.brief,
+      frames: patch('frames', readFrame, prev.frames),
+      links: patch('links', readLink, prev.links),
+      cuts: patch('cuts', readCut, prev.cuts),
+      scenes: patch('scenes', readScene, prev.scenes),
+      assets: patch('assets', readAsset, prev.assets),
+      bible: patch('bible', readBibleEntry, prev.bible),
+      pages: patch('pages', readPage, prev.pages),
+      moodboard: patch('moodboard', readMoodItem, prev.moodboard),
     }
     this.metaDirty = false
+    this.briefDirty = false
     for (const listener of [...this.listeners]) listener()
   }
 
@@ -110,6 +126,15 @@ export class SnapshotStore {
           if (typeof first === 'string') dirty.add(first)
         }
       }
+      this.schedule()
+    }
+    map.observeDeep(handler)
+    this.cleanups.push(() => map.unobserveDeep(handler))
+  }
+
+  private watchWhole(map: YMap, markDirty: () => void): void {
+    const handler = () => {
+      markDirty()
       this.schedule()
     }
     map.observeDeep(handler)

@@ -3,13 +3,15 @@ import { linearize } from './cut'
 import { WeftError } from './errors'
 import { byCreation } from './graph'
 import { newId, timestamp } from './ids'
-import { DEFAULT_FRAME_SECONDS, buildSnapshot, readFrame, readLink, readMeta, str, type ProjectRoots, type YMap } from './read'
+import { DEFAULT_FRAME_SECONDS, buildSnapshot, num, readFrame, readLink, readMeta, str, type ProjectRoots, type YMap } from './read'
 import { applyTextDiff } from './text'
 import { clampSeconds } from './timing'
 import type {
   AspectRatio,
   AssetKind,
   AudioKind,
+  BibleKind,
+  MoodItemKind,
   CameraAngle,
   CameraMove,
   DurationMode,
@@ -112,7 +114,22 @@ export interface AssetInit {
   duration?: number | null
   url?: string | null
   title?: string
+  preview?: string | null
+  site?: string
   createdBy?: string | null
+}
+
+export type BriefField = 'logline' | 'audience' | 'tone'
+
+export interface MoodItemInit {
+  kind: MoodItemKind
+  assetId?: string | null
+  text?: string
+  color?: string
+  x: number
+  y: number
+  w?: number
+  h?: number
 }
 
 export type MetaPatch = Partial<{
@@ -178,11 +195,43 @@ export class Project implements ProjectRoots {
   get assets(): Y.Map<YMap> {
     return this.doc.getMap('assets')
   }
+  get bible(): Y.Map<YMap> {
+    return this.doc.getMap('bible')
+  }
+  get brief(): YMap {
+    return this.doc.getMap('brief')
+  }
+  get pages(): Y.Map<YMap> {
+    return this.doc.getMap('pages')
+  }
+  /** Notes content per page, kept apart from `pages` so typing never touches page metadata. */
+  get pageContent(): Y.Map<Y.XmlFragment> {
+    return this.doc.getMap('pageContent')
+  }
+  get moodboard(): Y.Map<YMap> {
+    return this.doc.getMap('moodboard')
+  }
 
-  /** The root types holding project data, for undo managers and observers. */
+  /**
+   * The root types edited through this class, for undo managers. Notes typing
+   * has its own origin and undo history (the editor's), so it isn't captured,
+   * but deleting a page is: undoing that brings its content back.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches Y.UndoManager's signature
   get roots(): Y.AbstractType<any>[] {
-    return [this.meta, this.frames, this.links, this.cuts, this.scenes, this.assets]
+    return [
+      this.meta,
+      this.frames,
+      this.links,
+      this.cuts,
+      this.scenes,
+      this.assets,
+      this.bible,
+      this.brief,
+      this.pages,
+      this.pageContent,
+      this.moodboard,
+    ]
   }
 
   transact<T>(fn: () => T): T {
@@ -1053,6 +1102,8 @@ export class Project implements ProjectRoots {
       m.set('duration', init.duration ?? null)
       m.set('url', init.url ?? null)
       m.set('title', init.title ?? '')
+      m.set('preview', init.preview ?? null)
+      m.set('site', init.site ?? '')
       m.set('createdBy', init.createdBy ?? null)
       return id
     })
@@ -1066,7 +1117,7 @@ export class Project implements ProjectRoots {
     })
   }
 
-  /** Deletes an asset and removes it from every frame that uses it. */
+  /** Deletes an asset and removes it everywhere it's used. */
   deleteAsset(assetId: string): void {
     this.transact(() => {
       for (const id of this.frames.keys()) {
@@ -1075,7 +1126,237 @@ export class Project implements ProjectRoots {
         if (frame.references.includes(assetId)) this.removeReference(id, assetId)
         for (const v of frame.media) if (v.assetId === assetId) this.removeMediaVersion(id, v.id)
       }
+      for (const id of this.bible.keys()) this.removeBibleAsset(id, assetId)
+      this.removeStyleRef(assetId)
+      const items = [...this.moodboard.values()].filter((m) => m.get('assetId') === assetId).map((m) => str(m.get('id')))
+      this.deleteMoodItems(items)
       this.assets.delete(assetId)
+    })
+  }
+
+  // ------------------------------------------------------------------- pages
+
+  /** A notes page. Passing an id makes creation idempotent (for default pages). */
+  createPage(title = 'Untitled', id: string = newId()): string {
+    return this.transact(() => {
+      if (!this.pages.has(id)) {
+        const m: YMap = new Y.Map()
+        this.pages.set(id, m)
+        m.set('id', id)
+        m.set('title', title)
+        m.set('createdAt', timestamp())
+      }
+      if (!this.pageContent.has(id)) this.pageContent.set(id, new Y.XmlFragment())
+      return id
+    })
+  }
+
+  renamePage(pageId: string, title: string): void {
+    this.transact(() => this.pages.get(pageId)?.set('title', title))
+  }
+
+  deletePage(pageId: string): void {
+    this.transact(() => {
+      this.pages.delete(pageId)
+      this.pageContent.delete(pageId)
+    })
+  }
+
+  /** The page's rich-text content, for the notes editor. */
+  pageFragment(pageId: string): Y.XmlFragment {
+    const existing = this.pageContent.get(pageId)
+    if (existing instanceof Y.XmlFragment) return existing
+    return this.transact(() => {
+      const created = new Y.XmlFragment()
+      this.pageContent.set(pageId, created)
+      return created
+    })
+  }
+
+  /** Projects start with a notes page; this adds it to projects made before pages existed. */
+  ensureNotesPage(): string {
+    const first = [...this.pages.values()].sort((a, b) => num(a.get('createdAt')) - num(b.get('createdAt')))[0]
+    return first ? str(first.get('id')) : this.createPage('Notes', 'notes')
+  }
+
+  // ------------------------------------------------------------------- bible
+
+  private requireBible(id: string): YMap {
+    const m = this.bible.get(id)
+    if (!m) throw new WeftError('not-found', `Bible entry ${id} doesn't exist`)
+    return m
+  }
+
+  createBibleEntry(kind: BibleKind, init: { name?: string; description?: string } = {}): string {
+    return this.transact(() => {
+      const id = newId()
+      const m: YMap = new Y.Map()
+      this.bible.set(id, m)
+      m.set('id', id)
+      m.set('kind', kind)
+      m.set('name', init.name ?? '')
+      m.set('description', new Y.Text(init.description ?? ''))
+      m.set('assetIds', new Y.Array<string>())
+      m.set('createdAt', timestamp())
+      return id
+    })
+  }
+
+  updateBibleEntry(id: string, patch: { name?: string; kind?: BibleKind }): void {
+    this.transact(() => {
+      const m = this.requireBible(id)
+      if (patch.name !== undefined) m.set('name', patch.name)
+      if (patch.kind !== undefined) m.set('kind', patch.kind)
+    })
+  }
+
+  bibleText(id: string): Y.Text {
+    const m = this.requireBible(id)
+    const existing = m.get('description')
+    if (existing instanceof Y.Text) return existing
+    return this.transact(() => {
+      const created = new Y.Text(typeof existing === 'string' ? existing : '')
+      m.set('description', created)
+      return created
+    })
+  }
+
+  private bibleAssets(id: string): Y.Array<string> {
+    const m = this.requireBible(id)
+    const existing = m.get('assetIds')
+    if (existing instanceof Y.Array) return existing as Y.Array<string>
+    const created = new Y.Array<string>()
+    this.transact(() => m.set('assetIds', created))
+    return created
+  }
+
+  addBibleAsset(id: string, assetId: string): void {
+    this.transact(() => {
+      const list = this.bibleAssets(id)
+      if (!list.toArray().includes(assetId)) list.push([assetId])
+    })
+  }
+
+  removeBibleAsset(id: string, assetId: string): void {
+    this.transact(() => {
+      if (!this.bible.has(id)) return
+      const list = this.bibleAssets(id)
+      const index = list.toArray().indexOf(assetId)
+      if (index >= 0) list.delete(index, 1)
+    })
+  }
+
+  /** Deletes a bible entry and untags it from every frame. */
+  deleteBibleEntry(id: string): void {
+    this.transact(() => {
+      for (const frameId of this.frames.keys()) {
+        const tags = this.getFrame(frameId)?.tags ?? []
+        if (tags.includes(id)) this.setTags(frameId, tags.filter((t) => t !== id))
+      }
+      this.bible.delete(id)
+    })
+  }
+
+  toggleFrameTag(frameId: string, entryId: string): void {
+    this.transact(() => {
+      const tags = this.getFrame(frameId)?.tags ?? []
+      this.setTags(frameId, tags.includes(entryId) ? tags.filter((t) => t !== entryId) : [...tags, entryId])
+    })
+  }
+
+  // ------------------------------------------------------------------- brief
+
+  briefText(field: BriefField): Y.Text {
+    const existing = this.brief.get(field)
+    if (existing instanceof Y.Text) return existing
+    return this.transact(() => {
+      const created = new Y.Text(typeof existing === 'string' ? existing : '')
+      this.brief.set(field, created)
+      return created
+    })
+  }
+
+  private styleRefs(): Y.Array<string> {
+    const existing = this.brief.get('styleRefs')
+    if (existing instanceof Y.Array) return existing as Y.Array<string>
+    const created = new Y.Array<string>()
+    this.transact(() => this.brief.set('styleRefs', created))
+    return created
+  }
+
+  addStyleRef(assetId: string): void {
+    this.transact(() => {
+      const list = this.styleRefs()
+      if (!list.toArray().includes(assetId)) list.push([assetId])
+    })
+  }
+
+  removeStyleRef(assetId: string): void {
+    this.transact(() => {
+      const list = this.styleRefs()
+      const index = list.toArray().indexOf(assetId)
+      if (index >= 0) list.delete(index, 1)
+    })
+  }
+
+  // --------------------------------------------------------------- moodboard
+
+  addMoodItem(init: MoodItemInit): string {
+    return this.transact(() => {
+      const id = newId()
+      const m: YMap = new Y.Map()
+      this.moodboard.set(id, m)
+      m.set('id', id)
+      m.set('kind', init.kind)
+      m.set('assetId', init.assetId ?? null)
+      m.set('text', new Y.Text(init.text ?? ''))
+      m.set('color', init.color ?? '#f2c14e')
+      m.set('x', Math.round(init.x))
+      m.set('y', Math.round(init.y))
+      m.set('w', Math.round(init.w ?? 240))
+      m.set('h', Math.round(init.h ?? 180))
+      m.set('createdAt', timestamp())
+      return id
+    })
+  }
+
+  updateMoodItem(id: string, patch: Partial<Pick<MoodItemInit, 'x' | 'y' | 'w' | 'h' | 'color' | 'assetId'>>): void {
+    this.transact(() => {
+      const m = this.moodboard.get(id)
+      if (!m) return
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) continue
+        m.set(key, typeof value === 'number' ? Math.round(value) : value)
+      }
+    })
+  }
+
+  moodText(id: string): Y.Text {
+    const m = this.moodboard.get(id)
+    if (!m) throw new WeftError('not-found', `Moodboard item ${id} doesn't exist`)
+    const existing = m.get('text')
+    if (existing instanceof Y.Text) return existing
+    return this.transact(() => {
+      const created = new Y.Text(typeof existing === 'string' ? existing : '')
+      m.set('text', created)
+      return created
+    })
+  }
+
+  setMoodPositions(positions: Readonly<Record<string, { x: number; y: number }>>): void {
+    this.transact(() => {
+      for (const [id, pos] of Object.entries(positions)) {
+        const m = this.moodboard.get(id)
+        if (!m) continue
+        m.set('x', Math.round(pos.x))
+        m.set('y', Math.round(pos.y))
+      }
+    })
+  }
+
+  deleteMoodItems(ids: readonly string[]): void {
+    this.transact(() => {
+      for (const id of ids) this.moodboard.delete(id)
     })
   }
 
