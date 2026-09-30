@@ -1,0 +1,185 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@xyflow/react/dist/base.css';
+
+/* Design tokens. Dark is the default; light swaps the same names. */
+:root {
+  color-scheme: dark;
+  --bg: #0d0e10;
+  --panel: #141518;
+  --raised: #1a1b1f;
+  --hover: #22232a;
+  --active: #2b2c35;
+  --line: #26272d;
+  --line-strong: #383942;
+  --fg: #ececf0;
+  --fg-2: #a4a5ae;
+  --fg-3: #6c6d77;
+  --accent: #8e7dff;
+  --accent-strong: #a89cff;
+  --accent-soft: rgb(142 125 255 / 0.15);
+  --accent-fg: #ffffff;
+  --warn: #f0b24f;
+  --warn-soft: rgb(240 178 79 / 0.14);
+  --danger: #f26d6d;
+  --danger-soft: rgb(242 109 109 / 0.13);
+  --ok: #52c788;
+  --canvas: #0a0b0d;
+  --canvas-dot: #25262d;
+  --media: #07080a;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f5f5f7;
+  --panel: #ffffff;
+  --raised: #ffffff;
+  --hover: #f0f0f4;
+  --active: #e6e6ec;
+  --line: #e3e3e9;
+  --line-strong: #cfcfd8;
+  --fg: #16171a;
+  --fg-2: #56575f;
+  --fg-3: #8b8c95;
+  --accent: #6a55f4;
+  --accent-strong: #5842e8;
+  --accent-soft: rgb(106 85 244 / 0.1);
+  --accent-fg: #ffffff;
+  --warn: #b7771c;
+  --warn-soft: rgb(183 119 28 / 0.12);
+  --danger: #d44343;
+  --danger-soft: rgb(212 67 67 / 0.1);
+  --ok: #2d9b60;
+  --canvas: #eeeef2;
+  --canvas-dot: #d3d3db;
+  --media: #e2e2e8;
+  --shadow: 0 10px 26px rgb(20 20 30 / 0.13);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-canvas: var(--canvas);
+  --color-media: var(--media);
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --shadow-pop: var(--shadow);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  textarea {
+    resize: none;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+}
+
+/* React Flow, themed with the tokens above. */
+.react-flow {
+  --xy-background-color: var(--canvas);
+  --xy-node-border-radius: 12px;
+  --xy-selection-background-color: var(--accent-soft);
+  --xy-selection-border: 1px solid var(--accent);
+  --xy-controls-button-background-color: var(--panel);
+  --xy-controls-button-background-color-hover: var(--hover);
+  --xy-controls-button-color: var(--fg-2);
+  --xy-controls-button-border-color: var(--line);
+  --xy-minimap-background-color: var(--panel);
+}
+
+.react-flow__node-frame {
+  border-radius: 12px;
+}
+
+.react-flow__handle {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--canvas);
+  background: var(--line-strong);
+  transition: background 120ms, transform 120ms;
+}
+.react-flow__handle:hover,
+.react-flow__handle.connectingfrom {
+  background: var(--accent);
+  transform: translate(var(--tx, 0), -50%) scale(1.25);
+}
+.react-flow__handle-left {
+  --tx: -50%;
+}
+.react-flow__handle-right {
+  --tx: 50%;
+}
+
+.react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .weft-link-path,
+.react-flow__edge:focus .weft-link-path {
+  stroke-width: 3;
+}
+
+.react-flow__attribution {
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 10px;
+}
+.react-flow__attribution a {
+  color: inherit;
+}
+
+/* Text fields inside frame cards scroll without showing a scrollbar. */
+.weft-card-text {
+  scrollbar-width: none;
+}
+.weft-card-text::-webkit-scrollbar {
+  display: none;
+}

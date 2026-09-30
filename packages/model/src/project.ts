@@ -1,0 +1,881 @@
+import * as Y from 'yjs'
+import { linearize } from './cut'
+import { WeftError } from './errors'
+import { byCreation } from './graph'
+import { newId, timestamp } from './ids'
+import { DEFAULT_FRAME_SECONDS, buildSnapshot, readFrame, readLink, readMeta, str, type ProjectRoots, type YMap } from './read'
+import { applyTextDiff } from './text'
+import { clampSeconds } from './timing'
+import type {
+  AspectRatio,
+  AssetKind,
+  AudioKind,
+  CameraAngle,
+  CameraMove,
+  DurationMode,
+  FrameSnapshot,
+  FrameStatus,
+  LinkSnapshot,
+  MediaSource,
+  MediaVersion,
+  ProjectMeta,
+  ProjectSnapshot,
+  ProjectType,
+  SceneColor,
+  ShotSize,
+  TransitionType,
+} from './types'
+
+export const TEXT_FIELDS = ['description', 'onScreenText', 'motionNotes', 'notes'] as const
+export type TextField = (typeof TEXT_FIELDS)[number]
+
+/** Spacing for frames placed by commands. Auto-layout replaces these positions. */
+export const FRAME_SPACING_X = 300
+export const FRAME_SPACING_Y = 280
+
+export interface AudioLineInit {
+  kind?: AudioKind
+  speaker?: string
+  text?: string
+  lang?: string
+}
+
+export interface FrameInit {
+  x?: number
+  y?: number
+  sceneId?: string | null
+  description?: string
+  onScreenText?: string
+  motionNotes?: string
+  notes?: string
+  audio?: AudioLineInit[]
+  shotSize?: ShotSize | null
+  angle?: CameraAngle | null
+  movement?: CameraMove | null
+  lens?: string | null
+  durationMode?: DurationMode
+  duration?: number
+  references?: string[]
+  tags?: string[]
+  status?: FrameStatus
+}
+
+export interface FramePatch {
+  x?: number
+  y?: number
+  sceneId?: string | null
+  shotSize?: ShotSize | null
+  angle?: CameraAngle | null
+  movement?: CameraMove | null
+  lens?: string | null
+  durationMode?: DurationMode
+  duration?: number
+  status?: FrameStatus
+}
+
+const FRAME_PATCH_KEYS: ReadonlySet<string> = new Set([
+  'x',
+  'y',
+  'sceneId',
+  'shotSize',
+  'angle',
+  'movement',
+  'lens',
+  'durationMode',
+  'duration',
+  'status',
+])
+
+export interface LinkPatch {
+  transition?: TransitionType
+  transitionDuration?: number
+  note?: string
+}
+
+export interface ScenePatch {
+  title?: string
+  intExt?: string
+  location?: string
+  timeOfDay?: string
+  color?: SceneColor
+}
+
+export interface AssetInit {
+  kind: AssetKind
+  hash?: string | null
+  name?: string
+  mime?: string
+  size?: number
+  width?: number | null
+  height?: number | null
+  duration?: number | null
+  url?: string | null
+  title?: string
+  createdBy?: string | null
+}
+
+export type MetaPatch = Partial<{
+  title: string
+  type: ProjectType
+  aspect: AspectRatio
+  fps: number
+  targetDuration: number | null
+  wordsPerSecond: number
+  autoLayout: boolean
+}>
+
+function pushAudioLine(audio: Y.Array<YMap>, init: AudioLineInit): string {
+  const id = newId()
+  const m: YMap = new Y.Map()
+  audio.push([m])
+  m.set('id', id)
+  m.set('kind', init.kind ?? 'vo')
+  m.set('speaker', init.speaker ?? '')
+  m.set('lang', init.lang ?? 'en')
+  m.set('text', new Y.Text(init.text ?? ''))
+  return id
+}
+
+function indexOf<T>(array: Y.Array<T>, match: (item: T) => boolean): number {
+  let index = -1
+  array.forEach((item, i) => {
+    if (index === -1 && match(item)) index = i
+  })
+  return index
+}
+
+/**
+ * A storyboard project stored in a Yjs document. Every edit goes through these
+ * commands, whether it comes from the app, the server, or Claude via MCP.
+ */
+export class Project implements ProjectRoots {
+  readonly doc: Y.Doc
+  /** Transaction origin for edits made through this instance (used by undo). */
+  readonly origin: object
+
+  constructor(doc: Y.Doc, origin: object = { source: 'local' }) {
+    this.doc = doc
+    this.origin = origin
+  }
+
+  get meta(): YMap {
+    return this.doc.getMap('meta')
+  }
+  get frames(): Y.Map<YMap> {
+    return this.doc.getMap('frames')
+  }
+  get links(): Y.Map<YMap> {
+    return this.doc.getMap('links')
+  }
+  get cuts(): Y.Map<YMap> {
+    return this.doc.getMap('cuts')
+  }
+  get scenes(): Y.Map<YMap> {
+    return this.doc.getMap('scenes')
+  }
+  get assets(): Y.Map<YMap> {
+    return this.doc.getMap('assets')
+  }
+
+  /** The root types holding project data, for undo managers and observers. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches Y.UndoManager's signature
+  get roots(): Y.AbstractType<any>[] {
+    return [this.meta, this.frames, this.links, this.cuts, this.scenes, this.assets]
+  }
+
+  transact<T>(fn: () => T): T {
+    let result: T | undefined
+    this.doc.transact(() => {
+      result = fn()
+    }, this.origin)
+    return result as T
+  }
+
+  snapshot(): ProjectSnapshot {
+    return buildSnapshot(this)
+  }
+
+  getMeta(): ProjectMeta {
+    return readMeta(this.meta)
+  }
+
+  getFrame(id: string): FrameSnapshot | null {
+    const m = this.frames.get(id)
+    return m ? readFrame(m) : null
+  }
+
+  mainCutId(): string {
+    return str(this.meta.get('mainCutId'))
+  }
+
+  // ------------------------------------------------------------------ lookup
+
+  private requireFrame(id: string): YMap {
+    const m = this.frames.get(id)
+    if (!m) throw new WeftError('not-found', `Frame ${id} doesn't exist`)
+    return m
+  }
+
+  private requireLink(id: string): YMap {
+    const m = this.links.get(id)
+    if (!m) throw new WeftError('not-found', `Link ${id} doesn't exist`)
+    return m
+  }
+
+  private requireCut(id: string): YMap {
+    const m = this.cuts.get(id)
+    if (!m) throw new WeftError('not-found', `Cut ${id} doesn't exist`)
+    return m
+  }
+
+  private requireScene(id: string): YMap {
+    const m = this.scenes.get(id)
+    if (!m) throw new WeftError('not-found', `Scene ${id} doesn't exist`)
+    return m
+  }
+
+  private linksOut(frameId: string): LinkSnapshot[] {
+    const out: LinkSnapshot[] = []
+    for (const m of this.links.values()) if (m.get('from') === frameId) out.push(readLink(m))
+    return out.sort(byCreation)
+  }
+
+  private linksIn(frameId: string): LinkSnapshot[] {
+    const out: LinkSnapshot[] = []
+    for (const m of this.links.values()) if (m.get('to') === frameId) out.push(readLink(m))
+    return out.sort(byCreation)
+  }
+
+  /** True if there's a path of links from `from` to `to`, optionally not passing through `skip`. */
+  canReach(from: string, to: string, skip?: string): boolean {
+    const adjacency = new Map<string, string[]>()
+    for (const m of this.links.values()) {
+      const a = str(m.get('from'))
+      const list = adjacency.get(a)
+      if (list) list.push(str(m.get('to')))
+      else adjacency.set(a, [str(m.get('to'))])
+    }
+    const stack = [from]
+    const seen = new Set<string>()
+    while (stack.length) {
+      const cur = stack.pop()!
+      if (cur === to) return true
+      if (seen.has(cur) || cur === skip) continue
+      seen.add(cur)
+      for (const next of adjacency.get(cur) ?? []) stack.push(next)
+    }
+    return false
+  }
+
+  // ------------------------------------------------------------------ frames
+
+  createFrame(init: FrameInit = {}): string {
+    return this.transact(() => {
+      const id = newId()
+      const m: YMap = new Y.Map()
+      this.frames.set(id, m)
+      m.set('id', id)
+      m.set('createdAt', timestamp())
+      m.set('x', init.x ?? 0)
+      m.set('y', init.y ?? 0)
+      m.set('sceneId', init.sceneId ?? null)
+      for (const field of TEXT_FIELDS) m.set(field, new Y.Text(init[field] ?? ''))
+      const audio = new Y.Array<YMap>()
+      m.set('audio', audio)
+      for (const line of init.audio ?? []) pushAudioLine(audio, line)
+      m.set('shotSize', init.shotSize ?? null)
+      m.set('angle', init.angle ?? null)
+      m.set('movement', init.movement ?? null)
+      m.set('lens', init.lens ?? null)
+      m.set('durationMode', init.durationMode ?? 'auto')
+      m.set('duration', clampSeconds(init.duration ?? DEFAULT_FRAME_SECONDS))
+      m.set('media', new Y.Array<MediaVersion>())
+      m.set('heroMediaId', null)
+      const references = new Y.Array<string>()
+      m.set('references', references)
+      if (init.references?.length) references.push([...init.references])
+      const tags = new Y.Array<string>()
+      m.set('tags', tags)
+      if (init.tags?.length) tags.push([...init.tags])
+      m.set('status', init.status ?? 'draft')
+      return id
+    })
+  }
+
+  /** Adds a frame at the end of a cut (or the first frame of an empty project). */
+  appendFrame(cutId = this.mainCutId(), init: FrameInit = {}): string {
+    return this.transact(() => {
+      const items = linearize(this.snapshot(), cutId)
+      const last = items[items.length - 1]
+      if (!last) return this.createFrame(init)
+      return this.insertFrameAfter(last.frameId, { cutId, init })
+    })
+  }
+
+  /**
+   * Inserts a new frame right after `afterId`. If `afterId` already leads
+   * somewhere, the new frame is spliced in between. At a fork, the path the
+   * given cut follows is the one that gets spliced.
+   */
+  insertFrameAfter(afterId: string, opts: { cutId?: string; init?: FrameInit } = {}): string {
+    return this.transact(() => {
+      const after = readFrame(this.requireFrame(afterId))
+      const outs = this.linksOut(afterId)
+      let target: LinkSnapshot | undefined
+      if (outs.length === 1) target = outs[0]
+      else if (outs.length > 1) {
+        const cut = this.cuts.get(opts.cutId ?? this.mainCutId())
+        const choice = (cut?.get('choices') as Y.Map<string> | undefined)?.get(afterId)
+        target = outs.find((l) => l.id === choice) ?? outs[0]
+      }
+      const id = this.createFrame({
+        x: after.x + FRAME_SPACING_X,
+        y: after.y,
+        sceneId: after.sceneId,
+        ...opts.init,
+      })
+      if (target) {
+        // Keep the original link (and any cut choice pointing at it) as after -> new.
+        this.requireLink(target.id).set('to', id)
+        this.createLink(id, target.to, {})
+      } else {
+        this.createLink(afterId, id, {})
+      }
+      return id
+    })
+  }
+
+  /**
+   * Creates an alternative to `frameId` with the same incoming and outgoing
+   * links, so it forks and merges back. Copies text and camera, not media.
+   */
+  addVariation(frameId: string): string {
+    return this.transact(() => {
+      const src = readFrame(this.requireFrame(frameId))
+      const id = this.createFrame({
+        x: src.x,
+        y: src.y + FRAME_SPACING_Y,
+        sceneId: src.sceneId,
+        description: src.description,
+        onScreenText: src.onScreenText,
+        motionNotes: src.motionNotes,
+        audio: src.audio.map(({ kind, speaker, text, lang }) => ({ kind, speaker, text, lang })),
+        shotSize: src.shotSize,
+        angle: src.angle,
+        movement: src.movement,
+        lens: src.lens,
+        durationMode: src.durationMode,
+        duration: src.duration,
+        references: src.references,
+        tags: src.tags,
+      })
+      for (const l of this.linksIn(frameId)) {
+        this.createLink(l.from, id, { transition: l.transition, transitionDuration: l.transitionDuration })
+      }
+      for (const l of this.linksOut(frameId)) {
+        this.createLink(id, l.to, { transition: l.transition, transitionDuration: l.transitionDuration })
+      }
+      return id
+    })
+  }
+
+  /**
+   * Deletes frames. A frame in the middle of a chain is bridged so the chain
+   * stays connected, unless its neighbours are already connected another way
+   * (as when deleting one of several variations).
+   */
+  deleteFrames(ids: readonly string[]): void {
+    this.transact(() => {
+      for (const id of ids) {
+        if (!this.frames.has(id)) continue
+        const ins = this.linksIn(id)
+        const outs = this.linksOut(id)
+        const inLink = ins[0]
+        const outLink = outs[0]
+        if (
+          ins.length === 1 &&
+          outs.length === 1 &&
+          inLink &&
+          outLink &&
+          inLink.from !== outLink.to &&
+          !this.canReach(inLink.from, outLink.to, id)
+        ) {
+          // Reuse the incoming link so cut choices pointing at it stay valid.
+          this.requireLink(inLink.id).set('to', outLink.to)
+          this.removeLink(outLink.id)
+        }
+        for (const l of [...this.linksIn(id), ...this.linksOut(id)]) this.removeLink(l.id)
+        this.frames.delete(id)
+        for (const cut of this.cuts.values()) {
+          ;(cut.get('choices') as Y.Map<string> | undefined)?.delete(id)
+          ;(cut.get('hidden') as Y.Map<boolean> | undefined)?.delete(id)
+          ;(cut.get('overrides') as Y.Map<number> | undefined)?.delete(id)
+          if (cut.get('start') === id) cut.set('start', null)
+        }
+      }
+    })
+  }
+
+  updateFrame(id: string, patch: FramePatch): void {
+    this.transact(() => {
+      const m = this.requireFrame(id)
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) continue
+        if (!FRAME_PATCH_KEYS.has(key)) throw new WeftError('invalid', `Unknown frame field "${key}"`)
+        m.set(key, key === 'duration' ? clampSeconds(value as number) : value)
+      }
+    })
+  }
+
+  /** Sets a manual duration (switches the frame out of auto timing). */
+  setDuration(frameId: string, seconds: number): void {
+    this.updateFrame(frameId, { durationMode: 'manual', duration: seconds })
+  }
+
+  /** Returns the frame to automatic timing (from VO, else its default). */
+  resetDuration(frameId: string): void {
+    this.updateFrame(frameId, { durationMode: 'auto' })
+  }
+
+  setPositions(positions: Readonly<Record<string, { x: number; y: number }>>): void {
+    this.transact(() => {
+      for (const [id, pos] of Object.entries(positions)) {
+        const m = this.frames.get(id)
+        if (!m) continue
+        m.set('x', Math.round(pos.x))
+        m.set('y', Math.round(pos.y))
+      }
+    })
+  }
+
+  /** The live Y.Text behind a text field, for editor bindings. */
+  frameText(frameId: string, field: TextField): Y.Text {
+    const m = this.requireFrame(frameId)
+    const existing = m.get(field)
+    if (existing instanceof Y.Text) return existing
+    return this.transact(() => {
+      const created = new Y.Text(typeof existing === 'string' ? existing : '')
+      m.set(field, created)
+      return created
+    })
+  }
+
+  setText(frameId: string, field: TextField, value: string): void {
+    this.transact(() => applyTextDiff(this.frameText(frameId, field), value))
+  }
+
+  // ------------------------------------------------------------- audio lines
+
+  private audioArray(frameId: string): Y.Array<YMap> {
+    const m = this.requireFrame(frameId)
+    const existing = m.get('audio')
+    if (existing instanceof Y.Array) return existing as Y.Array<YMap>
+    const created = new Y.Array<YMap>()
+    this.transact(() => m.set('audio', created))
+    return created
+  }
+
+  private audioLine(frameId: string, lineId: string): YMap {
+    const line = this.audioArray(frameId)
+      .toArray()
+      .find((l) => l.get('id') === lineId)
+    if (!line) throw new WeftError('not-found', `Audio line ${lineId} doesn't exist`)
+    return line
+  }
+
+  addAudioLine(frameId: string, init: AudioLineInit = {}): string {
+    return this.transact(() => pushAudioLine(this.audioArray(frameId), init))
+  }
+
+  updateAudioLine(frameId: string, lineId: string, patch: { kind?: AudioKind; speaker?: string; lang?: string }): void {
+    this.transact(() => {
+      const line = this.audioLine(frameId, lineId)
+      if (patch.kind !== undefined) line.set('kind', patch.kind)
+      if (patch.speaker !== undefined) line.set('speaker', patch.speaker)
+      if (patch.lang !== undefined) line.set('lang', patch.lang)
+    })
+  }
+
+  audioText(frameId: string, lineId: string): Y.Text {
+    const line = this.audioLine(frameId, lineId)
+    const existing = line.get('text')
+    if (existing instanceof Y.Text) return existing
+    return this.transact(() => {
+      const created = new Y.Text(typeof existing === 'string' ? existing : '')
+      line.set('text', created)
+      return created
+    })
+  }
+
+  setAudioText(frameId: string, lineId: string, value: string): void {
+    this.transact(() => applyTextDiff(this.audioText(frameId, lineId), value))
+  }
+
+  removeAudioLine(frameId: string, lineId: string): void {
+    this.transact(() => {
+      const audio = this.audioArray(frameId)
+      const index = indexOf(audio, (l) => l.get('id') === lineId)
+      if (index >= 0) audio.delete(index, 1)
+    })
+  }
+
+  /** Id of the frame's first VO line, creating an empty one if there isn't one. */
+  voLineId(frameId: string): string {
+    return this.transact(() => {
+      const existing = this.audioArray(frameId)
+        .toArray()
+        .find((l) => l.get('kind') === 'vo')
+      const id = existing?.get('id')
+      return typeof id === 'string' ? id : this.addAudioLine(frameId, { kind: 'vo' })
+    })
+  }
+
+  /** Sets the text of the frame's first VO line. */
+  setVo(frameId: string, value: string): void {
+    this.transact(() => this.setAudioText(frameId, this.voLineId(frameId), value))
+  }
+
+  // ------------------------------------------------------ media and references
+
+  addMediaVersion(
+    frameId: string,
+    assetId: string,
+    opts: { source?: MediaSource; label?: string; makeHero?: boolean } = {},
+  ): string {
+    return this.transact(() => {
+      const m = this.requireFrame(frameId)
+      let media = m.get('media')
+      if (!(media instanceof Y.Array)) {
+        media = new Y.Array<MediaVersion>()
+        m.set('media', media)
+      }
+      const version: MediaVersion = {
+        id: newId(),
+        assetId,
+        createdAt: timestamp(),
+        source: opts.source ?? 'upload',
+        label: opts.label ?? '',
+      }
+      ;(media as Y.Array<MediaVersion>).push([version])
+      if (opts.makeHero !== false) m.set('heroMediaId', version.id)
+      return version.id
+    })
+  }
+
+  setHeroMedia(frameId: string, mediaId: string | null): void {
+    this.transact(() => this.requireFrame(frameId).set('heroMediaId', mediaId))
+  }
+
+  removeMediaVersion(frameId: string, mediaId: string): void {
+    this.transact(() => {
+      const m = this.requireFrame(frameId)
+      const media = m.get('media')
+      if (!(media instanceof Y.Array)) return
+      const list = media as Y.Array<MediaVersion>
+      const index = indexOf(list, (v) => v.id === mediaId)
+      if (index >= 0) list.delete(index, 1)
+      if (m.get('heroMediaId') === mediaId) {
+        const last = list.length ? list.get(list.length - 1) : undefined
+        m.set('heroMediaId', last?.id ?? null)
+      }
+    })
+  }
+
+  private stringArray(frameId: string, key: 'references' | 'tags'): Y.Array<string> {
+    const m = this.requireFrame(frameId)
+    const existing = m.get(key)
+    if (existing instanceof Y.Array) return existing as Y.Array<string>
+    const created = new Y.Array<string>()
+    this.transact(() => m.set(key, created))
+    return created
+  }
+
+  addReference(frameId: string, assetId: string): void {
+    this.transact(() => {
+      const refs = this.stringArray(frameId, 'references')
+      if (!refs.toArray().includes(assetId)) refs.push([assetId])
+    })
+  }
+
+  removeReference(frameId: string, assetId: string): void {
+    this.transact(() => {
+      const refs = this.stringArray(frameId, 'references')
+      const index = refs.toArray().indexOf(assetId)
+      if (index >= 0) refs.delete(index, 1)
+    })
+  }
+
+  setTags(frameId: string, tags: readonly string[]): void {
+    this.transact(() => {
+      const arr = this.stringArray(frameId, 'tags')
+      arr.delete(0, arr.length)
+      arr.push([...new Set(tags)])
+    })
+  }
+
+  // ------------------------------------------------------------------- links
+
+  private createLink(from: string, to: string, init: LinkPatch): string {
+    const id = newId()
+    const m: YMap = new Y.Map()
+    this.links.set(id, m)
+    m.set('id', id)
+    m.set('from', from)
+    m.set('to', to)
+    m.set('createdAt', timestamp())
+    m.set('transition', init.transition ?? 'cut')
+    m.set('transitionDuration', init.transitionDuration ?? 0)
+    m.set('note', init.note ?? '')
+    return id
+  }
+
+  private removeLink(linkId: string): void {
+    this.links.delete(linkId)
+    for (const cut of this.cuts.values()) {
+      const choices = cut.get('choices')
+      if (!(choices instanceof Y.Map)) continue
+      for (const [fork, chosen] of [...choices.entries()]) if (chosen === linkId) choices.delete(fork)
+    }
+  }
+
+  /** Connects two frames. Returns the existing link if they're already connected. */
+  linkFrames(from: string, to: string, init: LinkPatch = {}): string {
+    return this.transact(() => {
+      this.requireFrame(from)
+      this.requireFrame(to)
+      if (from === to) throw new WeftError('invalid', "A frame can't link to itself")
+      const existing = this.linksOut(from).find((l) => l.to === to)
+      if (existing) return existing.id
+      if (this.canReach(to, from)) throw new WeftError('cycle', 'That link would loop back to an earlier frame')
+      return this.createLink(from, to, init)
+    })
+  }
+
+  deleteLink(linkId: string): void {
+    this.transact(() => this.removeLink(linkId))
+  }
+
+  updateLink(linkId: string, patch: LinkPatch): void {
+    this.transact(() => {
+      const m = this.requireLink(linkId)
+      if (patch.transition !== undefined) m.set('transition', patch.transition)
+      if (patch.transitionDuration !== undefined) m.set('transitionDuration', Math.max(0, patch.transitionDuration))
+      if (patch.note !== undefined) m.set('note', patch.note)
+    })
+  }
+
+  // -------------------------------------------------------------------- cuts
+
+  createCut(name: string, opts: { copyFrom?: string; main?: boolean } = {}): string {
+    return this.transact(() => {
+      const src = opts.copyFrom ? this.requireCut(opts.copyFrom) : undefined
+      const id = newId()
+      const m: YMap = new Y.Map()
+      this.cuts.set(id, m)
+      m.set('id', id)
+      m.set('name', name)
+      m.set('createdAt', timestamp())
+      m.set('isMain', opts.main === true)
+      m.set('targetDuration', src ? (src.get('targetDuration') ?? null) : null)
+      m.set('start', src ? (src.get('start') ?? null) : null)
+      for (const key of ['choices', 'hidden', 'overrides'] as const) {
+        const map = new Y.Map<unknown>()
+        m.set(key, map)
+        const from = src?.get(key)
+        if (from instanceof Y.Map) for (const [k, v] of from.entries()) map.set(k, v)
+      }
+      return id
+    })
+  }
+
+  renameCut(cutId: string, name: string): void {
+    this.transact(() => this.requireCut(cutId).set('name', name))
+  }
+
+  setCutTarget(cutId: string, seconds: number | null): void {
+    this.transact(() => this.requireCut(cutId).set('targetDuration', seconds === null ? null : clampSeconds(seconds)))
+  }
+
+  setCutStart(cutId: string, frameId: string | null): void {
+    this.transact(() => {
+      if (frameId) this.requireFrame(frameId)
+      this.requireCut(cutId).set('start', frameId)
+    })
+  }
+
+  /** Makes the cut follow this link at its fork. */
+  chooseLink(cutId: string, linkId: string): void {
+    this.transact(() => {
+      const link = readLink(this.requireLink(linkId))
+      ;(this.requireCut(cutId).get('choices') as Y.Map<string>).set(link.from, linkId)
+    })
+  }
+
+  /** Changes the cut's choices so its path runs through `frameId`. */
+  routeThrough(cutId: string, frameId: string): void {
+    this.transact(() => {
+      const cut = this.requireCut(cutId)
+      this.requireFrame(frameId)
+      const s = this.snapshot()
+      const onPath = new Set(linearize(s, cutId).map((i) => i.frameId))
+      if (onPath.has(frameId)) return
+      const incoming = new Map<string, LinkSnapshot[]>()
+      for (const l of Object.values(s.links)) {
+        const list = incoming.get(l.to)
+        if (list) list.push(l)
+        else incoming.set(l.to, [l])
+      }
+      // Walk backwards to the nearest frame on the path, or to a root.
+      const next = new Map<string, LinkSnapshot>()
+      const queue = [frameId]
+      const seen = new Set(queue)
+      let anchor: string | null = null
+      while (queue.length) {
+        const cur = queue.shift()!
+        const ins = (incoming.get(cur) ?? []).sort(byCreation)
+        if (onPath.has(cur) || !ins.length) {
+          anchor = cur
+          break
+        }
+        for (const l of ins) {
+          if (seen.has(l.from)) continue
+          seen.add(l.from)
+          next.set(l.from, l)
+          queue.push(l.from)
+        }
+      }
+      if (!anchor) return
+      if (!onPath.has(anchor)) cut.set('start', anchor)
+      const choices = cut.get('choices') as Y.Map<string>
+      let cur = anchor
+      while (cur !== frameId) {
+        const l = next.get(cur)
+        if (!l) break
+        choices.set(cur, l.id)
+        cur = l.to
+      }
+    })
+  }
+
+  setHidden(cutId: string, frameId: string, hidden: boolean): void {
+    this.transact(() => {
+      const map = this.requireCut(cutId).get('hidden') as Y.Map<boolean>
+      if (hidden) map.set(frameId, true)
+      else map.delete(frameId)
+    })
+  }
+
+  setOverride(cutId: string, frameId: string, seconds: number | null): void {
+    this.transact(() => {
+      const map = this.requireCut(cutId).get('overrides') as Y.Map<number>
+      if (seconds === null) map.delete(frameId)
+      else map.set(frameId, clampSeconds(seconds))
+    })
+  }
+
+  deleteCut(cutId: string): void {
+    this.transact(() => {
+      if (this.requireCut(cutId).get('isMain') === true) throw new WeftError('invalid', "The main cut can't be deleted")
+      this.cuts.delete(cutId)
+    })
+  }
+
+  // ------------------------------------------------------------------ scenes
+
+  createScene(init: ScenePatch = {}): string {
+    return this.transact(() => {
+      const id = newId()
+      const m: YMap = new Y.Map()
+      this.scenes.set(id, m)
+      m.set('id', id)
+      m.set('createdAt', timestamp())
+      m.set('title', init.title ?? '')
+      m.set('intExt', init.intExt ?? '')
+      m.set('location', init.location ?? '')
+      m.set('timeOfDay', init.timeOfDay ?? '')
+      m.set('color', init.color ?? 'violet')
+      return id
+    })
+  }
+
+  updateScene(sceneId: string, patch: ScenePatch): void {
+    this.transact(() => {
+      const m = this.requireScene(sceneId)
+      for (const [key, value] of Object.entries(patch)) if (value !== undefined) m.set(key, value)
+    })
+  }
+
+  deleteScene(sceneId: string): void {
+    this.transact(() => {
+      for (const f of this.frames.values()) if (f.get('sceneId') === sceneId) f.set('sceneId', null)
+      this.scenes.delete(sceneId)
+    })
+  }
+
+  assignScene(frameIds: readonly string[], sceneId: string | null): void {
+    this.transact(() => {
+      if (sceneId) this.requireScene(sceneId)
+      for (const id of frameIds) this.requireFrame(id).set('sceneId', sceneId)
+    })
+  }
+
+  // ------------------------------------------------------------------ assets
+
+  /** Adds an asset, or returns the existing one with the same file or URL. */
+  addAsset(init: AssetInit): string {
+    return this.transact(() => {
+      for (const m of this.assets.values()) {
+        if (init.hash && m.get('hash') === init.hash) return str(m.get('id'))
+        if (init.kind === 'link' && init.url && m.get('kind') === 'link' && m.get('url') === init.url) {
+          return str(m.get('id'))
+        }
+      }
+      const id = newId()
+      const m: YMap = new Y.Map()
+      this.assets.set(id, m)
+      m.set('id', id)
+      m.set('createdAt', timestamp())
+      m.set('kind', init.kind)
+      m.set('hash', init.hash ?? null)
+      m.set('name', init.name ?? '')
+      m.set('mime', init.mime ?? '')
+      m.set('size', init.size ?? 0)
+      m.set('width', init.width ?? null)
+      m.set('height', init.height ?? null)
+      m.set('duration', init.duration ?? null)
+      m.set('url', init.url ?? null)
+      m.set('title', init.title ?? '')
+      m.set('createdBy', init.createdBy ?? null)
+      return id
+    })
+  }
+
+  updateAsset(assetId: string, patch: Partial<Omit<AssetInit, 'kind' | 'hash'>>): void {
+    this.transact(() => {
+      const m = this.assets.get(assetId)
+      if (!m) throw new WeftError('not-found', `Asset ${assetId} doesn't exist`)
+      for (const [key, value] of Object.entries(patch)) if (value !== undefined) m.set(key, value)
+    })
+  }
+
+  /** Deletes an asset and removes it from every frame that uses it. */
+  deleteAsset(assetId: string): void {
+    this.transact(() => {
+      for (const id of this.frames.keys()) {
+        const frame = this.getFrame(id)
+        if (!frame) continue
+        if (frame.references.includes(assetId)) this.removeReference(id, assetId)
+        for (const v of frame.media) if (v.assetId === assetId) this.removeMediaVersion(id, v.id)
+      }
+      this.assets.delete(assetId)
+    })
+  }
+
+  // -------------------------------------------------------------------- meta
+
+  updateMeta(patch: MetaPatch): void {
+    this.transact(() => {
+      for (const [key, value] of Object.entries(patch)) if (value !== undefined) this.meta.set(key, value)
+    })
+  }
+}

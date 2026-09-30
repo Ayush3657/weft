@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.local
+
+# Runtime data written by the local server (projects, media, database)
+apps/server/data/
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code settings for this machine only
+.claude/settings.local.json
