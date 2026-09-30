@@ -5,6 +5,7 @@ import {
   readAsset,
   readBibleEntry,
   readBrief,
+  readChangeSet,
   readCut,
   readFrame,
   readLink,
@@ -33,7 +34,7 @@ function patchRecord<T>(
   return next
 }
 
-type Collection = 'frames' | 'links' | 'cuts' | 'scenes' | 'assets' | 'bible' | 'pages' | 'moodboard'
+type Collection = 'frames' | 'links' | 'cuts' | 'scenes' | 'assets' | 'bible' | 'pages' | 'moodboard' | 'changes'
 
 /**
  * Keeps an immutable snapshot of a project up to date. Frames, links and other
@@ -60,6 +61,7 @@ export class SnapshotStore {
     bible: new Set(),
     pages: new Set(),
     moodboard: new Set(),
+    changes: new Set(),
   }
 
   constructor(project: Project) {
@@ -104,6 +106,7 @@ export class SnapshotStore {
       bible: patch('bible', readBibleEntry, prev.bible),
       pages: patch('pages', readPage, prev.pages),
       moodboard: patch('moodboard', readMoodItem, prev.moodboard),
+      changes: patch('changes', readChangeSet, prev.changes),
     }
     this.metaDirty = false
     this.briefDirty = false

@@ -13,11 +13,13 @@ import {
   SHOT_SIZES,
   TRANSITIONS,
   BIBLE_KINDS,
+  CHANGE_STATUSES,
   MOOD_ITEM_KINDS,
   type AssetSnapshot,
   type AudioLine,
   type BibleEntrySnapshot,
   type BriefSnapshot,
+  type ChangeSetSnapshot,
   type CutSnapshot,
   type FrameSnapshot,
   type LinkSnapshot,
@@ -42,6 +44,7 @@ export interface ProjectRoots {
   readonly brief: YMap
   readonly pages: Y.Map<YMap>
   readonly moodboard: Y.Map<YMap>
+  readonly changes: Y.Map<YMap>
 }
 
 export const DEFAULT_WORDS_PER_SECOND = 2.5
@@ -267,6 +270,21 @@ export function readMoodItem(m: YMap): MoodItemSnapshot {
   }
 }
 
+export function readChangeSet(m: YMap): ChangeSetSnapshot {
+  return {
+    id: str(m.get('id')),
+    agent: str(m.get('agent'), 'Claude'),
+    userId: optStr(m.get('userId')),
+    userName: str(m.get('userName')),
+    startedAt: num(m.get('startedAt')),
+    updatedAt: num(m.get('updatedAt')),
+    status: oneOf(m.get('status'), CHANGE_STATUSES, 'open'),
+    summary: strings(m.get('summary')),
+    frameIds: strings(m.get('frameIds')),
+    undoable: bool(m.get('undoable'), true),
+  }
+}
+
 function readAll<T>(map: Y.Map<YMap>, read: (m: YMap) => T): Record<string, T> {
   const out: Record<string, T> = {}
   for (const [id, m] of map.entries()) if (m instanceof Y.Map) out[id] = read(m)
@@ -285,5 +303,6 @@ export function buildSnapshot(r: ProjectRoots): ProjectSnapshot {
     brief: readBrief(r.brief),
     pages: readAll(r.pages, readPage),
     moodboard: readAll(r.moodboard, readMoodItem),
+    changes: readAll(r.changes, readChangeSet),
   }
 }

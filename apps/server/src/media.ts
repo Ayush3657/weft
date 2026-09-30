@@ -17,6 +17,11 @@ function mediaPath(hash: string): string {
   return path.join(mediaDir, hash.slice(0, 2), hash.slice(2, 4), hash)
 }
 
+/** Where a stored file is on disk, or null if the server doesn't have it. */
+export function mediaFile(hash: string): string | null {
+  return getMedia(hash) ? mediaPath(hash) : null
+}
+
 export function getMedia(hash: string): MediaRow | null {
   if (!HASH_PATTERN.test(hash)) return null
   const row = db.prepare('SELECT * FROM media WHERE hash = ?').get(hash) as MediaRow | undefined
@@ -75,6 +80,12 @@ export async function storeMedia(
     'INSERT OR IGNORE INTO media (hash, mime, size, created_at, created_by) VALUES (@hash, @mime, @size, @created_at, @created_by)',
   ).run(row)
   return row
+}
+
+/** Stores a file the server fetched itself (for example from a web address Claude gave). */
+export async function storeMediaBuffer(data: Uint8Array<ArrayBuffer>, mime: string, userId: string): Promise<MediaRow> {
+  const hash = createHash('sha256').update(data).digest('hex')
+  return storeMedia(new Blob([data]).stream(), hash, mime, userId)
 }
 
 /** A response for the file, honouring Range requests so video can seek. */

@@ -2,6 +2,7 @@ import { getRequestListener } from '@hono/node-server'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer, type RawData } from 'ws'
+import { closeAllSessions } from './agent/session'
 import { app } from './app'
 import { log } from './log'
 import { hocuspocus } from './sync'
@@ -49,6 +50,7 @@ export function startServer(options: { port: number; host: string }): Promise<Ru
       resolve({
         port,
         async close() {
+          await closeAllSessions()
           hocuspocus.flushPendingStores()
           hocuspocus.closeConnections()
           for (const client of sockets.clients) client.terminate()

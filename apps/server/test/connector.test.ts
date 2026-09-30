@@ -1,0 +1,92 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import sharp from 'sharp'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+const dataDir = mkdtempSync(path.join(os.tmpdir(), 'weft-connector-test-'))
+process.env.DATA_DIR = dataDir
+process.env.NODE_ENV = 'test'
+process.env.DEV_LOGIN = 'true'
+process.env.PUBLIC_URL = 'http://localhost:5173'
+
+const { startServer } = await import('../src/server')
+const { db } = await import('../src/db')
+
+const connectorDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../mcp')
+const connector = path.join(connectorDir, 'dist/weft-mcp.mjs')
+
+type Running = Awaited<ReturnType<typeof startServer>>
+type ToolResult = { content: Array<{ type: string; text?: string }>; isError?: boolean }
+
+let server: Running
+let base = ''
+let token = ''
+let projectId = ''
+let client: Client
+
+beforeAll(async () => {
+  execFileSync(process.execPath, ['build.mjs'], { cwd: connectorDir })
+  server = await startServer({ port: 0, host: '127.0.0.1' })
+  base = `http://127.0.0.1:${server.port}`
+  const origin = 'http://localhost:5173'
+  const login = await fetch(`${base}/api/auth/dev`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin },
+    body: JSON.stringify({ name: 'Ayush', email: 'ayush@example.com' }),
+  })
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+  const post = (pathname: string, body: unknown) =>
+    fetch(`${base}${pathname}`, { method: 'POST', headers: { 'content-type': 'application/json', origin, cookie }, body: JSON.stringify(body) }).then(
+      (r) => r.json() as Promise<Record<string, unknown>>,
+    )
+  projectId = ((await post('/api/projects', { title: 'Render test', type: 'film' })).project as { id: string }).id
+  token = (await post('/api/tokens', { name: 'Claude Desktop' })).token as string
+
+  // Started the way Claude Desktop starts it: node, the file, and two settings.
+  client = new Client({ name: 'claude-desktop-test', version: '1.0.0' })
+  await client.connect(
+    new StdioClientTransport({ command: process.execPath, args: [connector], env: { WEFT_URL: base, WEFT_TOKEN: token }, stderr: 'pipe' }),
+  )
+})
+
+afterAll(async () => {
+  await client?.close()
+  await server.close()
+  db.close()
+  rmSync(dataDir, { recursive: true, force: true })
+})
+
+const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as ToolResult
+const textOf = (r: ToolResult) => r.content.map((c) => c.text ?? '').join('\n')
+
+describe('the Weft connector', () => {
+  it('passes Claude through to the server', async () => {
+    const info = client.getServerVersion()
+    expect(info?.name).toBe('weft')
+    expect(client.getInstructions()).toContain('Weft is a storyboarding app')
+    const { tools } = await client.listTools()
+    expect(tools.length).toBeGreaterThan(20)
+    expect(textOf(await call('list_projects', {}))).toContain('Render test')
+  })
+
+  it('uploads a file from this computer when Claude attaches it by path', async () => {
+    const render = path.join(dataDir, 'shot_010.png')
+    writeFileSync(render, await sharp({ create: { width: 320, height: 180, channels: 3, background: '#335577' } }).png().toBuffer())
+    const attached = await call('attach_media', { project: projectId, to: 'frame_picture', frame: '1', path: render })
+    expect(attached.isError).toBeFalsy()
+    expect(textOf(attached)).toContain('Attached shot_010.png (image)')
+    const cut = textOf(await call('get_cut', { project: projectId }))
+    expect(cut).toContain('Picture: image')
+  })
+
+  it('says clearly when the file is missing', async () => {
+    const missing = await call('attach_media', { project: projectId, to: 'frame_picture', frame: '1', path: path.join(dataDir, 'nope.png') })
+    expect(missing.isError).toBe(true)
+    expect(textOf(missing)).toContain("There's no file at")
+  })
+})

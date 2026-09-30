@@ -254,6 +254,28 @@ export interface MoodItemSnapshot {
   createdAt: number
 }
 
+export type ChangeStatus = 'open' | 'kept' | 'undone'
+export const CHANGE_STATUSES: readonly ChangeStatus[] = ['open', 'kept', 'undone']
+
+/** A batch of edits an assistant (Claude, through MCP) made, for people to keep or undo. */
+export interface ChangeSetSnapshot {
+  id: string
+  /** Who made the edits: "Claude". */
+  agent: string
+  /** The person whose access the assistant used. */
+  userId: string | null
+  userName: string
+  startedAt: number
+  updatedAt: number
+  status: ChangeStatus
+  /** One line per edit, e.g. "Added frames 4 to 7". */
+  summary: string[]
+  /** Frames created or changed. */
+  frameIds: string[]
+  /** False once the server can no longer undo it (the assistant's session ended). */
+  undoable: boolean
+}
+
 export interface ProjectSnapshot {
   meta: ProjectMeta
   frames: Readonly<Record<string, FrameSnapshot>>
@@ -265,4 +287,5 @@ export interface ProjectSnapshot {
   brief: BriefSnapshot
   pages: Readonly<Record<string, PageSnapshot>>
   moodboard: Readonly<Record<string, MoodItemSnapshot>>
+  changes: Readonly<Record<string, ChangeSetSnapshot>>
 }

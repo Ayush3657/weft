@@ -1,0 +1,21 @@
+{
+  "name": "@weft/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Connects Claude Desktop (or Claude Code) to a Weft server over MCP.",
+  "type": "module",
+  "bin": {
+    "weft-mcp": "dist/weft-mcp.mjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "esbuild": "^0.28.2"
+  }
+}

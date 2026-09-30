@@ -1,4 +1,5 @@
 import { serveStatic } from '@hono/node-server/serve-static'
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { createMiddleware } from 'hono/factory'
@@ -14,9 +15,12 @@ import {
   isEmailAllowed,
   listAccessTokens,
   upsertUser,
+  userFromAccessToken,
   userFromRequest,
   type PublicUser,
 } from './auth'
+import { liveChangeSets, sessionWithChangeSet } from './agent/session'
+import { createAgentServer } from './agent/tools'
 import { config, isOriginAllowed } from './config'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
@@ -165,6 +169,70 @@ app.get('/api/unfurl', requireUser, async (c) => {
   const url = c.req.query('url')
   if (!url) return c.json({ error: 'Add a link to preview' }, 400)
   return c.json({ preview: await unfurl(url) })
+})
+
+// ------------------------------------------------------------- Claude (MCP)
+
+/**
+ * The MCP endpoint Claude connects to (through the Weft connector, or
+ * directly from Claude Code). Only access tokens work here, never the
+ * session cookie, so web pages can't drive it.
+ */
+app.all('/mcp', async (c) => {
+  const origin = c.req.header('origin')
+  if (origin && !isOriginAllowed(origin)) return c.json({ error: 'Origin not allowed' }, 403)
+  const auth = c.req.header('authorization')
+  const user = auth?.startsWith('Bearer ') ? userFromAccessToken(auth.slice(7).trim()) : null
+  if (!user) {
+    const message = 'Connect with a Weft access token (Authorization: Bearer weft_…). Make one in Weft from your account menu: Connect Claude.'
+    return c.json({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }, 401)
+  }
+  if (c.req.method !== 'POST') {
+    return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null }, 405, { Allow: 'POST' })
+  }
+  const call = (await c.req.raw
+    .clone()
+    .json()
+    .catch(() => null)) as { method?: string; params?: { name?: string } } | null
+  if (call?.method === 'tools/call') log.info(`${user.email} → ${call.params?.name ?? '?'} (Claude)`)
+  // Stateless: a fresh server per request, so any number of Claude windows can connect.
+  const server = createAgentServer(user)
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
+  await server.connect(transport)
+  try {
+    return await transport.handleRequest(c.req.raw)
+  } finally {
+    void server.close()
+  }
+})
+
+/** What the "Connect Claude" dialog needs to write Claude's settings. */
+app.get('/api/connect', requireUser, (c) =>
+  c.json({
+    serverUrl: config.agentUrl,
+    connectorPath: config.connectorPath,
+    connectorBuilt: existsSync(config.connectorPath),
+    // The Node that runs this server, so Claude Desktop doesn't depend on its PATH.
+    nodePath: process.execPath,
+  }),
+)
+
+/**
+ * Which of Claude's change sets can still be undone. Undo lives in the
+ * session's memory, so a server restart ends it.
+ */
+app.get('/api/projects/:id/changes/live', requireUser, async (c) => c.json({ live: await liveChangeSets(c.req.param('id')) }))
+
+/** Undoes a change set Claude made, while its session is still running. */
+app.post('/api/projects/:id/changes/:changeId/undo', requireUser, async (c) => {
+  const { id, changeId } = c.req.param()
+  const session = await sessionWithChangeSet(id, changeId)
+  if (!session) {
+    return c.json({ error: "These changes can't be undone from Weft any more, because Claude's session has ended. Ask Claude to change them back, or edit them by hand." }, 409)
+  }
+  const steps = session.undoChangeSet(changeId)
+  log.info(`${currentUser(c).email} undid Claude's change set ${changeId} (${steps} steps)`)
+  return c.json({ ok: true, steps })
 })
 
 // --------------------------------------------------------- access tokens

@@ -43,6 +43,12 @@ export const config = {
     ...(production ? [] : ['http://localhost:5173', 'http://127.0.0.1:5173']),
   ]),
   maxUploadBytes: Number(env.MAX_UPLOAD_MB ?? 1024) * 1024 * 1024,
+  /** Where people open the app: the web dev server in development. */
+  appUrl: (env.APP_URL ?? (production ? publicUrl : 'http://localhost:5173')).replace(/\/+$/, ''),
+  /** Where Claude's MCP connector reaches this server (the API itself, not the web dev server). */
+  agentUrl: (env.WEFT_AGENT_URL ?? (production ? publicUrl : `http://127.0.0.1:${port}`)).replace(/\/+$/, ''),
+  /** The connector Claude Desktop runs; built with `npm run build -w @weft/mcp`. */
+  connectorPath: path.resolve(serverRoot, '../mcp/dist/weft-mcp.mjs'),
   sessionDays: 30,
 }
 

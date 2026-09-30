@@ -8,6 +8,7 @@ import { useUploading } from '../lib/media'
 import { usePref } from '../lib/prefs'
 import { navigate, projectPath, type Workspace, type WriteLocation } from '../lib/router'
 import { useProject, useSnapshot, useSyncStatus, useUndoShortcuts } from '../project/hooks'
+import { ChangeBar } from '../project/ChangeBar'
 import { ProjectProvider } from '../project/ProjectProvider'
 import { AppHeader, LogoMark } from '../shell/Shell'
 import { Button, Field, FullScreenMessage, IconButton, Input, Kbd, Menu, Modal, Spinner } from '../ui'
@@ -167,6 +168,7 @@ function ProjectShell({ projectId, workspace, write }: { projectId: string; work
           <SyncIndicator />
         </div>
       </AppHeader>
+      <ChangeBar />
       <main className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           <Suspense fallback={loadingWorkspace}>

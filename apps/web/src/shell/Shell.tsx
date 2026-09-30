@@ -1,10 +1,11 @@
-import { LogOut, Moon, Sun } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { LogOut, Moon, Sparkles, Sun } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { useAuth, useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
 import { useTheme } from '../lib/prefs'
 import { navigate } from '../lib/router'
 import { Avatar, Menu } from '../ui'
+import { ConnectClaude } from './ConnectClaude'
 
 export function LogoMark({ size = 22 }: { size?: number }) {
   return (
@@ -42,29 +43,34 @@ export function UserMenu() {
   const user = useUser()
   const { signOut } = useAuth()
   const [theme, setTheme] = useTheme()
+  const [connecting, setConnecting] = useState(false)
   return (
-    <Menu
-      header={
-        <div>
-          <div className="font-medium text-fg">{user.name}</div>
-          <div>{user.email}</div>
-        </div>
-      }
-      trigger={
-        <button type="button" className="rounded-full p-0.5 hover:bg-hover" aria-label="Account and settings">
-          <Avatar name={user.name} />
-        </button>
-      }
-      items={[
-        {
-          label: theme === 'dark' ? 'Light theme' : 'Dark theme',
-          icon: theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />,
-          onSelect: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
-        },
-        'separator',
-        { label: 'Sign out', icon: <LogOut size={14} />, onSelect: () => void signOut() },
-      ]}
-    />
+    <>
+      <Menu
+        header={
+          <div>
+            <div className="font-medium text-fg">{user.name}</div>
+            <div>{user.email}</div>
+          </div>
+        }
+        trigger={
+          <button type="button" className="rounded-full p-0.5 hover:bg-hover" aria-label="Account and settings">
+            <Avatar name={user.name} />
+          </button>
+        }
+        items={[
+          { label: 'Connect Claude…', icon: <Sparkles size={14} />, onSelect: () => setConnecting(true) },
+          {
+            label: theme === 'dark' ? 'Light theme' : 'Dark theme',
+            icon: theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />,
+            onSelect: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+          },
+          'separator',
+          { label: 'Sign out', icon: <LogOut size={14} />, onSelect: () => void signOut() },
+        ]}
+      />
+      <ConnectClaude open={connecting} onOpenChange={setConnecting} />
+    </>
   )
 }
 

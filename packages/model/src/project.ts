@@ -3,6 +3,7 @@ import { linearize } from './cut'
 import { WeftError } from './errors'
 import { byCreation } from './graph'
 import { newId, timestamp } from './ids'
+import { appendMarkdown } from './notes'
 import { DEFAULT_FRAME_SECONDS, buildSnapshot, num, readFrame, readLink, readMeta, str, type ProjectRoots, type YMap } from './read'
 import { applyTextDiff } from './text'
 import { clampSeconds } from './timing'
@@ -11,6 +12,7 @@ import type {
   AssetKind,
   AudioKind,
   BibleKind,
+  ChangeStatus,
   MoodItemKind,
   CameraAngle,
   CameraMove,
@@ -210,6 +212,10 @@ export class Project implements ProjectRoots {
   }
   get moodboard(): Y.Map<YMap> {
     return this.doc.getMap('moodboard')
+  }
+  /** Change sets made by assistants. Not part of undo: they record edits rather than make them. */
+  get changes(): Y.Map<YMap> {
+    return this.doc.getMap('changes')
   }
 
   /**
@@ -1162,6 +1168,11 @@ export class Project implements ProjectRoots {
     })
   }
 
+  /** Adds Markdown (headings, lists, links, bold…) to the end of a notes page. */
+  appendToPage(pageId: string, markdown: string): void {
+    this.transact(() => appendMarkdown(this.pageFragment(pageId), markdown))
+  }
+
   /** The page's rich-text content, for the notes editor. */
   pageFragment(pageId: string): Y.XmlFragment {
     const existing = this.pageContent.get(pageId)
@@ -1358,6 +1369,50 @@ export class Project implements ProjectRoots {
     this.transact(() => {
       for (const id of ids) this.moodboard.delete(id)
     })
+  }
+
+  // ----------------------------------------------------------------- changes
+
+  /** Starts a change set for an assistant's edits. */
+  startChangeSet(init: { agent: string; userId?: string | null; userName?: string }, id: string = newId()): string {
+    return this.transact(() => {
+      const m: YMap = new Y.Map()
+      this.changes.set(id, m)
+      const now = timestamp()
+      m.set('id', id)
+      m.set('agent', init.agent)
+      m.set('userId', init.userId ?? null)
+      m.set('userName', init.userName ?? '')
+      m.set('startedAt', now)
+      m.set('updatedAt', now)
+      m.set('status', 'open')
+      m.set('summary', new Y.Array<string>())
+      m.set('frameIds', new Y.Array<string>())
+      m.set('undoable', true)
+      return id
+    })
+  }
+
+  /** Adds a line to a change set, with the frames that edit touched. */
+  noteChange(id: string, line: string, frameIds: readonly string[] = []): void {
+    this.transact(() => {
+      const m = this.changes.get(id)
+      if (!m) throw new WeftError('not-found', `Change set ${id} doesn't exist`)
+      ;(m.get('summary') as Y.Array<string>).push([line])
+      const frames = m.get('frameIds') as Y.Array<string>
+      const known = new Set(frames.toArray())
+      const fresh = [...new Set(frameIds)].filter((f) => !known.has(f))
+      if (fresh.length) frames.push(fresh)
+      m.set('updatedAt', timestamp())
+    })
+  }
+
+  setChangeStatus(id: string, status: ChangeStatus): void {
+    this.transact(() => this.changes.get(id)?.set('status', status))
+  }
+
+  setChangeUndoable(id: string, undoable: boolean): void {
+    this.transact(() => this.changes.get(id)?.set('undoable', undoable))
   }
 
   // -------------------------------------------------------------------- meta

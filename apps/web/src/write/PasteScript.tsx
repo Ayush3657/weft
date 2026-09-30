@@ -1,4 +1,4 @@
-import { formatDuration, rowsToScript, textToTable } from '@weft/model'
+import { appendFrames, formatDuration, rowsToScript, textToTable } from '@weft/model'
 import { ClipboardPaste, Table2, X } from 'lucide-react'
 import { useMemo, useState, type ClipboardEvent } from 'react'
 import { cx } from '../lib/cx'
@@ -7,7 +7,6 @@ import { toast } from '../lib/toast'
 import { useProject } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, Modal, textareaClass } from '../ui'
-import { appendFrames } from './frames'
 
 /** Text of a table cell, keeping its line breaks. */
 function cellText(cell: HTMLTableCellElement): string {
@@ -58,7 +57,12 @@ export function PasteScript({ open, onOpenChange, cutId }: { open: boolean; onOp
     appendFrames(
       project,
       cutId,
-      rows.map((r) => ({ description: r.video, vo: r.audio, onScreenText: r.text, duration: r.duration })),
+      rows.map((r) => ({
+        description: r.video,
+        onScreenText: r.text,
+        audio: r.audio ? [{ kind: 'vo' as const, text: r.audio }] : [],
+        ...(r.duration ? { durationMode: 'manual' as const, duration: r.duration } : {}),
+      })),
     )
     toast(`Added ${rows.length} ${rows.length === 1 ? 'row' : 'rows'} to the script and the board.`, 'ok', {
       label: 'Show board',

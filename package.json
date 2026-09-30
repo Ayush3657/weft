@@ -7,10 +7,11 @@
     "apps/*"
   ],
   "scripts": {
+    "predev": "npm run build -w @weft/mcp",
     "dev": "concurrently -k -n server,web -c cyan,magenta \"npm run dev -w @weft/server\" \"npm run dev -w @weft/web\"",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "build": "npm run build -w @weft/web"
+    "build": "npm run build -w @weft/web && npm run build -w @weft/mcp"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

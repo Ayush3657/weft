@@ -168,6 +168,58 @@ async function fetchPublic(start: URL): Promise<Fetched> {
   throw new UnfurlError(502, 'Too many redirects')
 }
 
+// --------------------------------------------------------------- downloads
+
+function getFile(url: URL, maxBytes: number): Promise<{ status: number; location: string | null; contentType: string; data: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === 'https:' ? https : http
+    const req = client.get(
+      url,
+      { lookup: safeLookup, timeout: 20_000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Weft/0.1)', Accept: 'image/*,video/*,audio/*;q=0.9,*/*;q=0.5' } },
+      (res) => {
+        const status = res.statusCode ?? 0
+        const contentType = String(res.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
+        const location = typeof res.headers.location === 'string' ? res.headers.location : null
+        if ((status >= 300 && status < 400) || status >= 400) {
+          res.resume()
+          resolve({ status, location, contentType, data: Buffer.alloc(0) })
+          return
+        }
+        let size = 0
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => {
+          size += chunk.length
+          if (size > maxBytes) {
+            res.destroy()
+            reject(new UnfurlError(400, 'That file is too large'))
+            return
+          }
+          chunks.push(chunk)
+        })
+        res.on('end', () => resolve({ status, location, contentType, data: Buffer.concat(chunks) }))
+        res.on('error', reject)
+      },
+    )
+    req.on('timeout', () => req.destroy(new Error('Timed out')))
+    req.on('error', reject)
+  })
+}
+
+/** Downloads a file from a public web address, with the same address checks as link previews. */
+export async function downloadPublic(raw: string, maxBytes: number): Promise<{ url: URL; contentType: string; data: Buffer }> {
+  let url = parsePublicUrl(raw)
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await getFile(url, maxBytes)
+    if (res.status >= 300 && res.status < 400 && res.location) {
+      url = parsePublicUrl(new URL(res.location, url).toString())
+      continue
+    }
+    if (res.status >= 400) throw new UnfurlError(502, `The address answered with an error (${res.status})`)
+    return { url, contentType: res.contentType, data: res.data }
+  }
+  throw new UnfurlError(502, 'Too many redirects')
+}
+
 // ------------------------------------------------------------------- parsing
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }

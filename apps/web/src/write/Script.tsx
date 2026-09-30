@@ -4,6 +4,7 @@ import {
   formatDuration,
   formatSeconds,
   graphOf,
+  isBlankFrame,
   shotLabels,
   type TimelineItem,
 } from '@weft/model'
@@ -33,7 +34,6 @@ import { useProject, useSnapshot } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, IconButton, Kbd, Menu, Tooltip } from '../ui'
 import { SecondsInput } from '../ui/inputs'
-import { isBlankFrame } from './frames'
 import { PasteScript } from './PasteScript'
 
 const ROW_MIME = 'application/x-weft-script-row'

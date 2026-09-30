@@ -4,6 +4,7 @@ import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { appendFrames } from '@weft/model'
 import {
   Bold,
   Clapperboard,
@@ -34,7 +35,6 @@ import { useProject, useSnapshot } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, Field, IconButton, Input, Kbd, Modal } from '../ui'
 import { useFilePicker } from '../ui/inputs'
-import { appendFrames } from './frames'
 import { LinkCardNode, MediaNode, assetNodes } from './notes-nodes'
 
 /**

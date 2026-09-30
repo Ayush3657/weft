@@ -17,6 +17,11 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
-    "vitest": "^5.0.2"
+    "@tiptap/core": "^3.31.4",
+    "@tiptap/pm": "^3.31.4",
+    "@tiptap/starter-kit": "^3.31.4",
+    "@tiptap/y-tiptap": "^3.0.9",
+    "vitest": "^5.0.2",
+    "y-protocols": "^1.0.7"
   }
 }
