@@ -10,6 +10,7 @@ import {
   formatSeconds,
   graphOf,
   shotLabels,
+  spokenSeconds,
   voWordCount,
   type AudioKind,
   type CameraAngle,
@@ -19,7 +20,7 @@ import {
   type ShotSize,
   type TransitionType,
 } from '@weft/model'
-import { ArrowRight, GitBranchPlus, ImagePlus, Plus, Trash2, X } from 'lucide-react'
+import { ArrowRight, GitBranchPlus, ImagePlus, Plus, Trash2, Unlink, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ChangeEvent, type InputHTMLAttributes, type ReactNode } from 'react'
 import { useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
@@ -265,6 +266,15 @@ function FrameInspector({
             >
               <GitBranchPlus size={15} />
             </IconButton>
+            <IconButton
+              size="sm"
+              label="Detach from sequence"
+              tooltip="Detach: cut this frame's links (the frames around it stay connected)"
+              disabled={!Object.values(s.links).some((l) => l.from === frameId || l.to === frameId)}
+              onClick={() => project.detachFrame(frameId)}
+            >
+              <Unlink size={15} />
+            </IconButton>
             <IconButton size="sm" label="Delete frame" onClick={() => project.deleteFrames([frameId])}>
               <Trash2 size={15} />
             </IconButton>
@@ -480,7 +490,7 @@ function AudioSection({ frame }: { frame: FrameSnapshot }) {
   const project = useProject()
   const s = useSnapshot()
   const words = voWordCount(frame)
-  const spoken = words / s.meta.wordsPerSecond
+  const spoken = spokenSeconds(frame, s.meta.wordsPerSecond, s.assets)
   return (
     <Section
       title="Voiceover and dialogue"
@@ -557,8 +567,9 @@ function TimingSection({ frame, cutId }: { frame: FrameSnapshot; cutId: string }
   const s = useSnapshot()
   const cut = s.cuts[cutId]
   const item = cutTimeline(s, cutId).byFrame.get(frame.id)
-  const base = baseDuration(frame, s.meta)
+  const base = baseDuration(frame, s.meta, s.assets)
   const words = voWordCount(frame)
+  const recorded = frame.audio.some((line) => line.assetId && s.assets[line.assetId]?.duration)
   return (
     <Section title="Timing">
       <div className="flex items-center gap-2">
@@ -586,9 +597,11 @@ function TimingSection({ frame, cutId }: { frame: FrameSnapshot; cutId: string }
       </div>
       {frame.durationMode === 'auto' && (
         <p className="text-[12px] text-fg-2">
-          {words > 0
-            ? `${formatDuration(base)}, from the voiceover.`
-            : `${formatDuration(base)}. With no voiceover, this uses the frame's default length.`}
+          {recorded
+            ? `${formatDuration(base)}, from the recorded voiceover.`
+            : words > 0
+              ? `${formatDuration(base)}, from the voiceover.`
+              : `${formatDuration(base)}. With no voiceover, this uses the frame's default length.`}
         </p>
       )}
       {cut && (
@@ -857,10 +870,13 @@ function CutOverview({ cutId }: { cutId: string }) {
             <li className="flex justify-between gap-2"><span>Variation</span><Kbd>Shift Enter</Kbd></li>
             <li className="flex justify-between gap-2"><span>Delete</span><Kbd>Del</Kbd></li>
             <li className="flex justify-between gap-2"><span>Undo / redo</span><span><Kbd>Ctrl Z</Kbd> <Kbd>Ctrl Shift Z</Kbd></span></li>
+            <li className="flex justify-between gap-2"><span>Cut links</span><span><Kbd>K</Kbd> or <Kbd>Ctrl</Kbd> + right-drag</span></li>
+            <li className="flex justify-between gap-2"><span>Pull a frame out</span><span><Kbd>Alt</Kbd> + drag</span></li>
             <li className="flex justify-between gap-2"><span>Select several</span><span><Kbd>Shift</Kbd> + drag</span></li>
           </ul>
           <p className="mt-3 text-[12px] text-fg-3">
-            Drag from a frame's right dot to branch. Drop or paste images onto frames.
+            To reorder, drag a frame onto a link or beside another frame. Right-click a frame for more. Drag from a
+            frame's right dot to branch. Drop or paste images onto frames.
           </p>
         </div>
       </div>

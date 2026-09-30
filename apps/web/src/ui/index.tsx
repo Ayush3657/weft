@@ -1,5 +1,5 @@
 import { Loader2, X } from 'lucide-react'
-import { Dialog, DropdownMenu, Tooltip as TooltipPrimitive } from 'radix-ui'
+import { ContextMenu, Dialog, DropdownMenu, Tooltip as TooltipPrimitive } from 'radix-ui'
 import {
   forwardRef,
   type ButtonHTMLAttributes,
@@ -252,6 +252,49 @@ export interface MenuItem {
   danger?: boolean
   disabled?: boolean
   checked?: boolean
+  shortcut?: string
+}
+
+const menuContentClass = 'z-50 min-w-48 rounded-lg border border-line-strong bg-raised p-1 shadow-pop'
+const menuItemClass =
+  'flex h-8 cursor-pointer items-center gap-2 rounded-md px-2.5 text-[13px] outline-none select-none data-[disabled]:cursor-default data-[disabled]:opacity-40 data-[highlighted]:bg-hover'
+
+function MenuItemContent({ item }: { item: MenuItem }) {
+  return (
+    <>
+      <span className="flex w-4 justify-center text-fg-2">{item.icon}</span>
+      <span className="flex-1">{item.label}</span>
+      {item.shortcut && <span className="pl-4 text-[11px] text-fg-3">{item.shortcut}</span>}
+      {item.checked && <span className="size-1.5 rounded-full bg-accent" aria-label="Current" />}
+    </>
+  )
+}
+
+/** Right-click menu for whatever it wraps. */
+export function ContextMenuArea({ items, children }: { items: Array<MenuItem | 'separator'>; children: ReactNode }) {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className={menuContentClass}>
+          {items.map((item, i) =>
+            item === 'separator' ? (
+              <ContextMenu.Separator key={`sep-${i}`} className="my-1 h-px bg-line" />
+            ) : (
+              <ContextMenu.Item
+                key={item.label}
+                disabled={item.disabled}
+                onSelect={() => window.setTimeout(item.onSelect, 0)}
+                className={cx(menuItemClass, item.danger ? 'text-danger' : 'text-fg')}
+              >
+                <MenuItemContent item={item} />
+              </ContextMenu.Item>
+            ),
+          )}
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
 }
 
 export function Menu({
@@ -269,11 +312,7 @@ export function Menu({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>{trigger}</DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align={align}
-          sideOffset={6}
-          className="z-50 min-w-48 rounded-lg border border-line-strong bg-raised p-1 shadow-pop"
-        >
+        <DropdownMenu.Content align={align} sideOffset={6} className={menuContentClass}>
           {header && <div className="px-2.5 pt-1.5 pb-2 text-[12px] text-fg-3">{header}</div>}
           {items.map((item, i) =>
             item === 'separator' ? (
@@ -285,14 +324,9 @@ export function Menu({
                 // Run after the menu has closed and handed focus back, so an action
                 // that opens a dialog isn't immediately closed by that focus change.
                 onSelect={() => window.setTimeout(item.onSelect, 0)}
-                className={cx(
-                  'flex h-8 cursor-pointer items-center gap-2 rounded-md px-2.5 text-[13px] outline-none select-none data-[disabled]:cursor-default data-[disabled]:opacity-40 data-[highlighted]:bg-hover',
-                  item.danger ? 'text-danger' : 'text-fg',
-                )}
+                className={cx(menuItemClass, item.danger ? 'text-danger' : 'text-fg')}
               >
-                <span className="flex w-4 justify-center text-fg-2">{item.icon}</span>
-                <span className="flex-1">{item.label}</span>
-                {item.checked && <span className="size-1.5 rounded-full bg-accent" aria-label="Current" />}
+                <MenuItemContent item={item} />
               </DropdownMenu.Item>
             ),
           )}

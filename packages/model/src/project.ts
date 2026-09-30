@@ -38,6 +38,7 @@ export interface AudioLineInit {
   speaker?: string
   text?: string
   lang?: string
+  assetId?: string | null
 }
 
 export interface FrameInit {
@@ -133,6 +134,7 @@ function pushAudioLine(audio: Y.Array<YMap>, init: AudioLineInit): string {
   m.set('speaker', init.speaker ?? '')
   m.set('lang', init.lang ?? 'en')
   m.set('text', new Y.Text(init.text ?? ''))
+  m.set('assetId', init.assetId ?? null)
   return id
 }
 
@@ -380,31 +382,81 @@ export class Project implements ProjectRoots {
   }
 
   /**
-   * Deletes frames. A frame in the middle of a chain is bridged so the chain
-   * stays connected, unless its neighbours are already connected another way
-   * (as when deleting one of several variations).
+   * Removes a frame's links and connects its neighbours to each other, so the
+   * story stays joined up: a fork moves to the frame before, a merge to the
+   * frame after. Pairs already connected another way (as around a variation)
+   * aren't bridged. Cuts that passed through the frame keep their path.
+   */
+  private bridgeAround(id: string): void {
+    // How each cut passes through the frame, captured before anything changes.
+    const snapshot = this.snapshot()
+    const passes: Array<{ cut: YMap; inLinkId: string | null; outLinkId: string | null; next: string | null }> = []
+    for (const cut of this.cuts.values()) {
+      const items = linearize(snapshot, str(cut.get('id')))
+      const k = items.findIndex((item) => item.frameId === id)
+      if (k >= 0) {
+        passes.push({
+          cut,
+          inLinkId: items[k]!.linkInId,
+          outLinkId: items[k + 1]?.linkInId ?? null,
+          next: items[k + 1]?.frameId ?? null,
+        })
+      }
+    }
+
+    const ins = this.linksIn(id)
+    const outs = this.linksOut(id)
+    const bridges = new Map<string, string>() // `${inLinkId}>${outLinkId}` -> link that now joins the two neighbours
+    for (const inLink of ins) {
+      let reused = false
+      for (const outLink of outs) {
+        if (inLink.from === outLink.to) continue
+        const key = `${inLink.id}>${outLink.id}`
+        const direct = this.linksOut(inLink.from).find((l) => l.to === outLink.to && l.id !== inLink.id)
+        if (direct) {
+          bridges.set(key, direct.id)
+          continue
+        }
+        if (this.canReach(inLink.from, outLink.to, id)) continue
+        if (!reused) {
+          // Reuse the incoming link, so choices pointing at it stay valid.
+          this.requireLink(inLink.id).set('to', outLink.to)
+          bridges.set(key, inLink.id)
+          reused = true
+        } else {
+          const created = this.createLink(inLink.from, outLink.to, {
+            transition: outLink.transition,
+            transitionDuration: outLink.transitionDuration,
+          })
+          bridges.set(key, created)
+        }
+      }
+      if (!reused) this.removeLink(inLink.id)
+    }
+    for (const outLink of outs) this.removeLink(outLink.id)
+
+    for (const { cut, inLinkId, outLinkId, next } of passes) {
+      const choices = cut.get('choices') as Y.Map<string> | undefined
+      choices?.delete(id)
+      if (inLinkId && outLinkId) {
+        const bridge = bridges.get(`${inLinkId}>${outLinkId}`)
+        const before = ins.find((l) => l.id === inLinkId)?.from
+        if (bridge && before && this.links.has(bridge)) choices?.set(before, bridge)
+      } else if (!inLinkId && cut.get('start') === id) {
+        cut.set('start', next)
+      }
+    }
+  }
+
+  /**
+   * Deletes frames. Each one is bridged first, so the frames around it stay
+   * connected (see `bridgeAround`).
    */
   deleteFrames(ids: readonly string[]): void {
     this.transact(() => {
       for (const id of ids) {
         if (!this.frames.has(id)) continue
-        const ins = this.linksIn(id)
-        const outs = this.linksOut(id)
-        const inLink = ins[0]
-        const outLink = outs[0]
-        if (
-          ins.length === 1 &&
-          outs.length === 1 &&
-          inLink &&
-          outLink &&
-          inLink.from !== outLink.to &&
-          !this.canReach(inLink.from, outLink.to, id)
-        ) {
-          // Reuse the incoming link so cut choices pointing at it stay valid.
-          this.requireLink(inLink.id).set('to', outLink.to)
-          this.removeLink(outLink.id)
-        }
-        for (const l of [...this.linksIn(id), ...this.linksOut(id)]) this.removeLink(l.id)
+        this.bridgeAround(id)
         this.frames.delete(id)
         for (const cut of this.cuts.values()) {
           ;(cut.get('choices') as Y.Map<string> | undefined)?.delete(id)
@@ -414,6 +466,83 @@ export class Project implements ProjectRoots {
         }
       }
     })
+  }
+
+  /** Takes a frame out of the sequence (cuts all its links) but keeps it on the board. */
+  detachFrame(frameId: string): void {
+    this.transact(() => {
+      this.requireFrame(frameId)
+      this.bridgeAround(frameId)
+    })
+  }
+
+  /** Moves a frame into a link: A → B becomes A → frame → B. The frame leaves its old place first. */
+  moveFrameToLink(frameId: string, linkId: string): void {
+    this.transact(() => {
+      this.requireFrame(frameId)
+      const link = readLink(this.requireLink(linkId))
+      if (link.from === frameId || link.to === frameId) return
+      this.bridgeAround(frameId)
+      if (this.links.has(linkId)) this.spliceInto(frameId, linkId)
+    })
+  }
+
+  /** Moves a frame to just before or after another frame, following the given cut at forks. */
+  moveFrameNextTo(frameId: string, targetId: string, side: 'before' | 'after', cutId?: string): void {
+    this.transact(() => {
+      if (frameId === targetId) return
+      this.requireFrame(frameId)
+      this.requireFrame(targetId)
+      this.bridgeAround(frameId)
+      this.placeNextTo(frameId, targetId, side, cutId)
+    })
+  }
+
+  /** Inserts a new frame just before `beforeId` (see `insertFrameAfter`). */
+  insertFrameBefore(beforeId: string, opts: { cutId?: string; init?: FrameInit } = {}): string {
+    return this.transact(() => {
+      const before = readFrame(this.requireFrame(beforeId))
+      const id = this.createFrame({
+        x: before.x - FRAME_SPACING_X,
+        y: before.y,
+        sceneId: before.sceneId,
+        ...opts.init,
+      })
+      this.placeNextTo(id, beforeId, 'before', opts.cutId)
+      return id
+    })
+  }
+
+  /** Connects an unlinked frame next to `targetId`. */
+  private placeNextTo(frameId: string, targetId: string, side: 'before' | 'after', cutId?: string): void {
+    const cut = this.cuts.get(cutId ?? this.mainCutId())
+    if (side === 'after') {
+      const outs = this.linksOut(targetId)
+      if (!outs.length) {
+        this.createLink(targetId, frameId, {})
+        return
+      }
+      const choice = (cut?.get('choices') as Y.Map<string> | undefined)?.get(targetId)
+      this.spliceInto(frameId, (outs.find((l) => l.id === choice) ?? outs[0]!).id)
+      return
+    }
+    const ins = this.linksIn(targetId)
+    if (!ins.length) {
+      this.createLink(frameId, targetId, {})
+      for (const c of this.cuts.values()) if (c.get('start') === targetId) c.set('start', frameId)
+      return
+    }
+    // Prefer the link the cut actually uses to reach the target.
+    const item = cut ? linearize(this.snapshot(), str(cut.get('id'))).find((i) => i.frameId === targetId) : undefined
+    this.spliceInto(frameId, (ins.find((l) => l.id === item?.linkInId) ?? ins[0]!).id)
+  }
+
+  /** A → B becomes A → frame → B, keeping the link's id (and any cut choice) on A → frame. */
+  private spliceInto(frameId: string, linkId: string): void {
+    const m = this.requireLink(linkId)
+    const to = str(m.get('to'))
+    m.set('to', frameId)
+    this.createLink(frameId, to, {})
   }
 
   updateFrame(id: string, patch: FramePatch): void {
@@ -509,6 +638,11 @@ export class Project implements ProjectRoots {
 
   setAudioText(frameId: string, lineId: string, value: string): void {
     this.transact(() => applyTextDiff(this.audioText(frameId, lineId), value))
+  }
+
+  /** Attaches recorded (or generated) audio to a line, or removes it with null. */
+  setAudioAsset(frameId: string, lineId: string, assetId: string | null): void {
+    this.transact(() => this.audioLine(frameId, lineId).set('assetId', assetId))
   }
 
   removeAudioLine(frameId: string, lineId: string): void {
@@ -655,6 +789,12 @@ export class Project implements ProjectRoots {
     this.transact(() => this.removeLink(linkId))
   }
 
+  deleteLinks(linkIds: readonly string[]): void {
+    this.transact(() => {
+      for (const id of linkIds) if (this.links.has(id)) this.removeLink(id)
+    })
+  }
+
   updateLink(linkId: string, patch: LinkPatch): void {
     this.transact(() => {
       const m = this.requireLink(linkId)
@@ -684,7 +824,75 @@ export class Project implements ProjectRoots {
         const from = src?.get(key)
         if (from instanceof Y.Map) for (const [k, v] of from.entries()) map.set(k, v)
       }
+      const beats = new Y.Array<number>()
+      m.set('beats', beats)
+      const srcBeats = src?.get('beats')
+      if (srcBeats instanceof Y.Array) beats.push(srcBeats.toArray().filter((b): b is number => typeof b === 'number'))
+      for (const key of ['musicAssetId', 'musicOffset', 'musicVolume'] as const) {
+        const value = src?.get(key)
+        if (value !== undefined) m.set(key, value)
+      }
       return id
+    })
+  }
+
+  // ------------------------------------------------------------ music, beats
+
+  setCutMusic(cutId: string, assetId: string | null): void {
+    this.transact(() => {
+      const cut = this.requireCut(cutId)
+      cut.set('musicAssetId', assetId)
+      if (assetId && cut.get('musicOffset') === undefined) cut.set('musicOffset', 0)
+    })
+  }
+
+  setMusicOffset(cutId: string, seconds: number): void {
+    this.transact(() => this.requireCut(cutId).set('musicOffset', Math.round(seconds * 100) / 100))
+  }
+
+  setMusicVolume(cutId: string, volume: number): void {
+    this.transact(() => this.requireCut(cutId).set('musicVolume', Math.min(1, Math.max(0, volume))))
+  }
+
+  private beatsOf(cutId: string): Y.Array<number> {
+    const cut = this.requireCut(cutId)
+    const existing = cut.get('beats')
+    if (existing instanceof Y.Array) return existing as Y.Array<number>
+    const created = new Y.Array<number>()
+    this.transact(() => cut.set('beats', created))
+    return created
+  }
+
+  /** Adds a beat marker (ignored if there's already one within 50 ms). */
+  addBeat(cutId: string, seconds: number): void {
+    this.transact(() => {
+      const beats = this.beatsOf(cutId)
+      const t = Math.round(seconds * 1000) / 1000
+      if (!beats.toArray().some((b) => Math.abs(b - t) < 0.05)) beats.push([t])
+    })
+  }
+
+  /** Removes the beat marker nearest to `seconds`, if one is within `tolerance`. */
+  removeBeat(cutId: string, seconds: number, tolerance = 0.1): void {
+    this.transact(() => {
+      const beats = this.beatsOf(cutId)
+      let best = -1
+      let bestDistance = tolerance
+      beats.forEach((b, i) => {
+        const d = Math.abs(b - seconds)
+        if (d <= bestDistance) {
+          best = i
+          bestDistance = d
+        }
+      })
+      if (best >= 0) beats.delete(best, 1)
+    })
+  }
+
+  clearBeats(cutId: string): void {
+    this.transact(() => {
+      const beats = this.beatsOf(cutId)
+      beats.delete(0, beats.length)
     })
   }
 

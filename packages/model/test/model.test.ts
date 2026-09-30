@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatSeconds,
   formatTimecode,
+  graphOf,
   initProject,
   linearize,
   shotLabels,
@@ -174,6 +175,108 @@ describe('variations and cuts', () => {
     p.routeThrough(main, alt)
     p.deleteFrames([alt])
     expect(order(p, main)).toEqual([first, b, c, d])
+  })
+})
+
+describe('rearranging', () => {
+  it('detaches a frame and joins its neighbours', () => {
+    const { p, main, first, b, c, d } = chain()
+    p.detachFrame(c)
+    expect(order(p, main)).toEqual([first, b, d])
+    expect(Object.keys(p.snapshot().frames)).toContain(c)
+    expect(shotLabels(p.snapshot()).has(c)).toBe(false)
+  })
+
+  it('hands a fork to the previous frame, keeping the cut on its path', () => {
+    const { p, main, first, b, c, d } = chain()
+    const alt = p.addVariation(c)
+    p.routeThrough(main, alt)
+    p.detachFrame(b)
+    expect(order(p, main)).toEqual([first, alt, d])
+    const outs = graphOf(p.snapshot()).out(first).map((l) => l.to)
+    expect(outs.sort()).toEqual([c, alt].sort())
+  })
+
+  it('joins every branch when a merge frame is detached', () => {
+    const { p, main, first, b, c, d } = chain()
+    const e = p.appendFrame()
+    const alt = p.addVariation(c)
+    p.detachFrame(d)
+    const g = graphOf(p.snapshot())
+    expect(g.out(c).map((l) => l.to)).toEqual([e])
+    expect(g.out(alt).map((l) => l.to)).toEqual([e])
+    expect(order(p, main)).toEqual([first, b, c, e])
+  })
+
+  it('moves a frame onto a link', () => {
+    const { p, main, first, b, c, d } = chain()
+    const link = Object.values(p.snapshot().links).find((l) => l.from === first && l.to === b)!
+    p.moveFrameToLink(d, link.id)
+    expect(order(p, main)).toEqual([first, d, b, c])
+  })
+
+  it('moves a frame before or after another frame', () => {
+    const { p, main, first, b, c, d } = chain()
+    p.moveFrameNextTo(b, d, 'after')
+    expect(order(p, main)).toEqual([first, c, d, b])
+    p.moveFrameNextTo(d, first, 'before')
+    expect(order(p, main)).toEqual([d, first, c, b])
+  })
+
+  it('moves a loose frame into the sequence', () => {
+    const { p, main, first, b, c, d } = chain()
+    const loose = p.createFrame()
+    p.moveFrameNextTo(loose, b, 'after')
+    expect(order(p, main)).toEqual([first, b, loose, c, d])
+  })
+
+  it('inserts a new frame before another', () => {
+    const { p, main, first, b } = chain()
+    const x = p.insertFrameBefore(b)
+    expect(order(p, main).slice(0, 3)).toEqual([first, x, b])
+    const y = p.insertFrameBefore(first)
+    expect(order(p, main)[0]).toBe(y)
+  })
+
+  it('cuts several links at once', () => {
+    const { p } = chain()
+    const ids = Object.values(p.snapshot().links).map((l) => l.id)
+    p.deleteLinks(ids.slice(0, 2))
+    expect(Object.keys(p.snapshot().links)).toHaveLength(1)
+  })
+
+  it('never creates a loop when moving', () => {
+    const { p, main, b, c, d } = chain()
+    const link = Object.values(p.snapshot().links).find((l) => l.from === c && l.to === d)!
+    p.moveFrameToLink(b, link.id)
+    const s = p.snapshot()
+    for (const l of Object.values(s.links)) expect(p.canReach(l.to, l.from)).toBe(false)
+    expect(order(p, main)).toHaveLength(4)
+  })
+})
+
+describe('audio and music', () => {
+  it('times a frame from its recorded voiceover', () => {
+    const { p, main, first } = setup()
+    p.setVo(first, 'Some homes you buy') // estimated 1.6 s
+    const asset = p.addAsset({ kind: 'audio', hash: 'a'.repeat(64), duration: 3.2, mime: 'audio/webm' })
+    p.setAudioAsset(first, p.voLineId(first), asset)
+    expect(cutTimeline(p.snapshot(), main).items[0]?.duration).toBeCloseTo(3.7) // recording + padding
+  })
+
+  it('keeps music and beats per cut', () => {
+    const { p, main } = setup()
+    const music = p.addAsset({ kind: 'audio', hash: 'b'.repeat(64), duration: 30, mime: 'audio/mpeg' })
+    p.setCutMusic(main, music)
+    p.addBeat(main, 1.5)
+    p.addBeat(main, 0.5)
+    p.addBeat(main, 1.52) // too close to 1.5, ignored
+    expect(p.snapshot().cuts[main]?.beats).toEqual([0.5, 1.5])
+    const short = p.createCut('15s', { copyFrom: main })
+    expect(p.snapshot().cuts[short]?.music?.assetId).toBe(music)
+    p.removeBeat(short, 0.52)
+    expect(p.snapshot().cuts[short]?.beats).toEqual([1.5])
+    expect(p.snapshot().cuts[main]?.beats).toEqual([0.5, 1.5])
   })
 })
 

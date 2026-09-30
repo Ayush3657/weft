@@ -11,15 +11,25 @@ import {
   useReactFlow,
   type Connection,
   type EdgeChange,
+  type EdgeMouseHandler,
   type NodeChange,
   type OnConnectEnd,
   type OnDelete,
   type OnNodeDrag,
+  type XYPosition,
 } from '@xyflow/react'
-import { LayoutGrid, Maximize, Plus, Redo2, Undo2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { LayoutGrid, Maximize, Plus, Redo2, Scissors, Undo2 } from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { useUser } from '../lib/auth'
-import { cx } from '../lib/cx'
 import { importFiles, mediaFiles } from '../lib/media'
 import { useTheme } from '../lib/prefs'
 import { toast, toastError } from '../lib/toast'
@@ -35,6 +45,16 @@ import { GAP_X, GAP_Y, cardSize, type CardSize } from './sizes'
 
 const nodeTypes = { frame: FrameNode }
 const edgeTypes = { link: LinkEdge }
+
+type DropTarget = { kind: 'link'; linkId: string } | { kind: 'frame'; frameId: string; side: 'before' | 'after' } | null
+
+const sameTarget = (a: DropTarget, b: DropTarget) =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    (a.kind === 'link' && b.kind === 'link'
+      ? a.linkId === b.linkId
+      : a.kind === 'frame' && b.kind === 'frame' && a.frameId === b.frameId && a.side === b.side))
 
 export function Board({ cutId }: { cutId: string }) {
   return (
@@ -53,6 +73,8 @@ function sameNodeData(a: FrameNodeData, b: FrameNodeData): boolean {
     a.inCut === b.inCut &&
     a.hiddenInCut === b.hiddenInCut &&
     a.size === b.size &&
+    a.dropSide === b.dropSide &&
+    a.hasLinks === b.hasLinks &&
     a.hero?.hash === b.hero?.hash &&
     a.hero?.kind === b.hero?.kind &&
     a.refs.length === b.refs.length &&
@@ -69,6 +91,23 @@ function layoutKey(s: ProjectSnapshot): string {
     .sort()
     .join(',')
   return `${frames}|${links}|${main ? `${main.start}:${JSON.stringify(main.choices)}` : ''}`
+}
+
+function distanceToSegment(p: XYPosition, a: XYPosition, b: XYPosition): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lengthSq = dx * dx + dy * dy
+  const t = lengthSq ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq)) : 0
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
+function segmentsCross(a: XYPosition, b: XYPosition, c: XYPosition, d: XYPosition): boolean {
+  const cross = (o: XYPosition, p: XYPosition, q: XYPosition) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x)
+  const d1 = cross(c, d, a)
+  const d2 = cross(c, d, b)
+  const d3 = cross(a, b, c)
+  const d4 = cross(a, b, d)
+  return d1 * d2 < 0 && d3 * d4 < 0
 }
 
 function BoardView({ cutId }: { cutId: string }) {
@@ -93,6 +132,17 @@ function BoardView({ cutId }: { cutId: string }) {
   )
 
   const frameList = useMemo(() => Object.values(s.frames).sort(byCreation), [s.frames])
+  const linkedFrames = useMemo(() => {
+    const ids = new Set<string>()
+    for (const l of Object.values(s.links)) {
+      ids.add(l.from)
+      ids.add(l.to)
+    }
+    return ids
+  }, [s.links])
+
+  const [dropTarget, setDropTarget] = useState<DropTarget>(null)
+  const dropTargetRef = useRef<DropTarget>(null)
 
   // Node data, reusing the previous object when nothing on the card changed.
   const dataCache = useRef(new Map<string, FrameNodeData>())
@@ -105,7 +155,7 @@ function BoardView({ cutId }: { cutId: string }) {
       const candidate: FrameNodeData = {
         frame,
         label: labels.get(frame.id) ?? null,
-        duration: item ? item.base : baseDuration(frame, s.meta),
+        duration: item ? item.base : baseDuration(frame, s.meta, s.assets),
         overridden: item?.overridden ?? false,
         inCut: item !== undefined,
         hiddenInCut: item?.hidden ?? false,
@@ -115,13 +165,15 @@ function BoardView({ cutId }: { cutId: string }) {
           return a ? [{ id: a.id, hash: a.hash, kind: a.kind, title: a.title || a.name }] : []
         }),
         size,
+        dropSide: dropTarget?.kind === 'frame' && dropTarget.frameId === frame.id ? dropTarget.side : null,
+        hasLinks: linkedFrames.has(frame.id),
       }
       const prev = dataCache.current.get(frame.id)
       next.set(frame.id, prev && sameNodeData(prev, candidate) ? prev : candidate)
     }
     dataCache.current = next
     return next
-  }, [frameList, timeline, labels, s.assets, s.meta, size])
+  }, [frameList, timeline, labels, s.assets, s.meta, size, dropTarget, linkedFrames])
 
   // ------------------------------------------------------------ node state
 
@@ -130,6 +182,8 @@ function BoardView({ cutId }: { cutId: string }) {
   nodesRef.current = nodes
   const dragging = useRef(new Set<string>())
   const pendingSelect = useRef<string | null>(null)
+  // Bumped to put frames back in their auto-arranged places after a drag that didn't move anything.
+  const [snapBack, setSnapBack] = useState(0)
 
   useEffect(() => {
     // A frame created by a command becomes selected once it shows up. Read the
@@ -171,7 +225,7 @@ function BoardView({ cutId }: { cutId: string }) {
       })
       return changed ? next : prev
     })
-  }, [frameList, nodeData, layout, size])
+  }, [frameList, nodeData, layout, size, snapBack])
 
   const onNodesChange = useCallback((changes: NodeChange<FrameNodeType>[]) => {
     for (const c of changes) {
@@ -183,6 +237,33 @@ function BoardView({ cutId }: { cutId: string }) {
 
   const selectedFrameIds = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes])
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null)
+
+  /** Pans to a frame if it's off screen, once React Flow knows where it is. */
+  const reveal = useCallback(
+    (frameId: string) => {
+      let tries = 0
+      const attempt = () => {
+        const node = flow.getInternalNode(frameId)
+        const el = containerRef.current
+        if (!node || !el) {
+          if (tries++ < 12) requestAnimationFrame(attempt)
+          return
+        }
+        const { x, y } = node.internals.positionAbsolute
+        const w = node.measured.width ?? size.width
+        const h = node.measured.height ?? size.height
+        const { x: vx, y: vy, zoom } = flow.getViewport()
+        const margin = 48
+        const left = x * zoom + vx
+        const top = y * zoom + vy
+        const offscreen =
+          left < margin || top < margin || left + w * zoom > el.clientWidth - margin || top + h * zoom > el.clientHeight - margin
+        if (offscreen) void flow.setCenter(x + w / 2, y + h / 2, { zoom, duration: 250 })
+      }
+      requestAnimationFrame(attempt)
+    },
+    [flow, size],
+  )
 
   const selectFrame = useCallback(
     (frameId: string, { focus = false }: { focus?: boolean } = {}) => {
@@ -197,33 +278,8 @@ function BoardView({ cutId }: { cutId: string }) {
       reveal(frameId)
       if (focus) focusFrameText(frameId)
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [reveal],
   )
-
-  /** Pans to a frame if it's off screen, once React Flow knows where it is. */
-  const reveal = (frameId: string) => {
-    let tries = 0
-    const attempt = () => {
-      const node = flow.getInternalNode(frameId)
-      const el = containerRef.current
-      if (!node || !el) {
-        if (tries++ < 12) requestAnimationFrame(attempt)
-        return
-      }
-      const { x, y } = node.internals.positionAbsolute
-      const w = node.measured.width ?? size.width
-      const h = node.measured.height ?? size.height
-      const { x: vx, y: vy, zoom } = flow.getViewport()
-      const margin = 48
-      const left = x * zoom + vx
-      const top = y * zoom + vy
-      const offscreen =
-        left < margin || top < margin || left + w * zoom > el.clientWidth - margin || top + h * zoom > el.clientHeight - margin
-      if (offscreen) void flow.setCenter(x + w / 2, y + h / 2, { zoom, duration: 250 })
-    }
-    requestAnimationFrame(attempt)
-  }
 
   // ------------------------------------------------------------ edge state
 
@@ -238,9 +294,14 @@ function BoardView({ cutId }: { cutId: string }) {
         type: 'link' as const,
         selected: link.id === selectedLinkId,
         zIndex: inCut.has(link.id) ? 1 : 0,
-        data: { link, inCut: inCut.has(link.id), start: timeline.byFrame.get(link.to)?.start ?? null },
+        data: {
+          link,
+          inCut: inCut.has(link.id),
+          start: timeline.byFrame.get(link.to)?.start ?? null,
+          dropTarget: dropTarget?.kind === 'link' && dropTarget.linkId === link.id,
+        },
       }))
-  }, [s.links, s.frames, timeline, selectedLinkId])
+  }, [s.links, s.frames, timeline, selectedLinkId, dropTarget])
 
   const onEdgesChange = useCallback((changes: EdgeChange<LinkEdgeType>[]) => {
     for (const c of changes) {
@@ -251,25 +312,28 @@ function BoardView({ cutId }: { cutId: string }) {
   // --------------------------------------------------------------- actions
 
   const insertAfter = useCallback(
-    (frameId: string) => {
-      const id = project.insertFrameAfter(frameId, { cutId })
-      selectFrame(id, { focus: true })
-    },
+    (frameId: string) => selectFrame(project.insertFrameAfter(frameId, { cutId }), { focus: true }),
     [project, cutId, selectFrame],
   )
-
+  const insertBefore = useCallback(
+    (frameId: string) => selectFrame(project.insertFrameBefore(frameId, { cutId }), { focus: true }),
+    [project, cutId, selectFrame],
+  )
   const addVariation = useCallback(
-    (frameId: string) => {
-      const id = project.addVariation(frameId)
-      selectFrame(id, { focus: true })
-    },
+    (frameId: string) => selectFrame(project.addVariation(frameId), { focus: true }),
     [project, selectFrame],
   )
-
-  const appendFrame = useCallback(() => {
-    const id = project.appendFrame(cutId)
-    selectFrame(id, { focus: true })
-  }, [project, cutId, selectFrame])
+  const appendFrame = useCallback(
+    () => selectFrame(project.appendFrame(cutId), { focus: true }),
+    [project, cutId, selectFrame],
+  )
+  const cutLink = useCallback(
+    (linkId: string) => {
+      project.deleteLink(linkId)
+      setSelectedLinkId(null)
+    },
+    [project],
+  )
 
   const importToFrame = useCallback(
     async (frameId: string, files: File[], target: 'media' | 'references') => {
@@ -307,14 +371,22 @@ function BoardView({ cutId }: { cutId: string }) {
   const actions: BoardActions = useMemo(
     () => ({
       insertAfter,
+      insertBefore,
       addVariation,
+      detach: (frameId) => project.detachFrame(frameId),
+      remove: (frameId) => project.deleteFrames([frameId]),
+      toggleHidden: (frameId) => {
+        const item = cutTimeline(project.snapshot(), cutId).byFrame.get(frameId)
+        if (item) project.setHidden(cutId, frameId, !item.hidden)
+      },
       selectLink: (linkId) => {
         setNodes((current) => current.map((n) => (n.selected ? { ...n, selected: false } : n)))
         setSelectedLinkId(linkId)
       },
+      cutLink,
       importToFrame: (frameId, files, target) => void importToFrame(frameId, files, target),
     }),
-    [insertAfter, addVariation, importToFrame],
+    [insertAfter, insertBefore, addVariation, project, cutId, cutLink, importToFrame],
   )
 
   const onConnect = useCallback(
@@ -357,23 +429,111 @@ function BoardView({ cutId }: { cutId: string }) {
     [flow, project, size, s.frames, selectFrame],
   )
 
-  const onNodeDragStop: OnNodeDrag<FrameNodeType> = useCallback(
-    (_event, _node, dragged) => {
-      const moved = Object.fromEntries(dragged.map((n) => [n.id, n.position]))
-      for (const n of dragged) dragging.current.delete(n.id)
-      if (project.getMeta().autoLayout) {
-        const all = Object.fromEntries(nodesRef.current.map((n) => [n.id, moved[n.id] ?? n.position]))
-        project.transact(() => {
-          project.setPositions(all)
-          project.updateMeta({ autoLayout: false })
-        })
-        toast('Frames now stay where you put them. Tidy turns auto-arrange back on.')
-      } else {
-        project.setPositions(moved)
+  const onEdgeClick: EdgeMouseHandler<LinkEdgeType> = useCallback(
+    (event, edge) => {
+      if (event.altKey) cutLink(edge.id)
+    },
+    [cutLink],
+  )
+
+  // ------------------------------------------------- dragging to rearrange
+
+  /** Where a dragged frame would land: next to a frame under the pointer, or into a link near it. */
+  const findDropTarget = useCallback(
+    (dragId: string, point: XYPosition): DropTarget => {
+      const { width: w, height: h } = size
+      for (const n of nodesRef.current) {
+        if (n.id === dragId) continue
+        const { x, y } = n.position
+        if (point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h) {
+          return { kind: 'frame', frameId: n.id, side: point.x < x + w / 2 ? 'before' : 'after' }
+        }
+      }
+      const positions = new Map(nodesRef.current.map((n) => [n.id, n.position]))
+      let best: DropTarget = null
+      let bestDistance = 36 / flow.getZoom()
+      for (const link of Object.values(project.snapshot().links)) {
+        if (link.from === dragId || link.to === dragId) continue
+        const a = positions.get(link.from)
+        const b = positions.get(link.to)
+        if (!a || !b) continue
+        const d = distanceToSegment(point, { x: a.x + w, y: a.y + h / 2 }, { x: b.x, y: b.y + h / 2 })
+        if (d < bestDistance) {
+          bestDistance = d
+          best = { kind: 'link', linkId: link.id }
+        }
+      }
+      return best
+    },
+    [size, flow, project],
+  )
+
+  const onNodeDrag: OnNodeDrag<FrameNodeType> = useCallback(
+    (event, node, dragged) => {
+      const pointer = 'touches' in event ? (event.touches[0] ?? event.changedTouches[0]) : event
+      const target =
+        dragged.length === 1 && pointer
+          ? findDropTarget(node.id, flow.screenToFlowPosition({ x: pointer.clientX, y: pointer.clientY }))
+          : null
+      if (!sameTarget(target, dropTargetRef.current)) {
+        dropTargetRef.current = target
+        setDropTarget(target)
       }
     },
-    [project],
+    [findDropTarget, flow],
   )
+
+  const reorderHintShown = useRef(false)
+
+  const onNodeDragStop: OnNodeDrag<FrameNodeType> = useCallback(
+    (event, _node, dragged) => {
+      const target = dropTargetRef.current
+      dropTargetRef.current = null
+      setDropTarget(null)
+      for (const n of dragged) dragging.current.delete(n.id)
+      const autoLayout = project.getMeta().autoLayout
+      const only = dragged.length === 1 ? dragged[0] : undefined
+
+      if (only && target) {
+        project.transact(() => {
+          if (target.kind === 'link') project.moveFrameToLink(only.id, target.linkId)
+          else project.moveFrameNextTo(only.id, target.frameId, target.side, cutId)
+          if (!autoLayout) project.setPositions({ [only.id]: only.position })
+        })
+        return
+      }
+      if (only && event.altKey) {
+        project.transact(() => {
+          project.detachFrame(only.id)
+          if (!autoLayout) project.setPositions({ [only.id]: only.position })
+        })
+        return
+      }
+      if (autoLayout) {
+        setSnapBack((n) => n + 1)
+        if (!reorderHintShown.current) {
+          reorderHintShown.current = true
+          toast('To move a frame, drop it onto a link or beside another frame. Turn off auto-arrange to place frames freely.')
+        }
+        return
+      }
+      project.setPositions(Object.fromEntries(dragged.map((n) => [n.id, n.position])))
+    },
+    [project, cutId],
+  )
+
+  const toggleAutoLayout = useCallback(() => {
+    if (project.getMeta().autoLayout) {
+      // Leave every frame where it is now.
+      const positions = Object.fromEntries(nodesRef.current.map((n) => [n.id, n.position]))
+      project.transact(() => {
+        project.setPositions(positions)
+        project.updateMeta({ autoLayout: false })
+      })
+    } else {
+      project.updateMeta({ autoLayout: true })
+    }
+  }, [project])
 
   const onDelete: OnDelete<FrameNodeType, LinkEdgeType> = useCallback(
     ({ nodes: deletedNodes, edges: deletedEdges }) => {
@@ -387,6 +547,76 @@ function BoardView({ cutId }: { cutId: string }) {
     [project],
   )
 
+  // ------------------------------------------------------------ knife tool
+
+  const [knifeMode, setKnifeMode] = useState(false)
+  const [knifePath, setKnifePath] = useState<XYPosition[] | null>(null)
+  const knife = useRef<{ points: XYPosition[]; pointerId: number } | null>(null)
+  const suppressContextMenu = useRef(false)
+
+  const localPoint = (e: ReactPointerEvent) => {
+    const rect = containerRef.current!.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
+  const onPointerDownCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const starts = (knifeMode && e.button === 0) || (e.button === 2 && e.ctrlKey)
+    if (!starts || (e.target as HTMLElement).closest('.react-flow__panel, .react-flow__controls, .react-flow__minimap')) return
+    e.preventDefault()
+    e.stopPropagation()
+    suppressContextMenu.current = e.button === 2
+    const point = localPoint(e)
+    knife.current = { points: [point], pointerId: e.pointerId }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setKnifePath([point])
+  }
+
+  const onPointerMoveCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const current = knife.current
+    if (!current) return
+    e.preventDefault()
+    e.stopPropagation()
+    const point = localPoint(e)
+    const last = current.points[current.points.length - 1]!
+    if (Math.hypot(point.x - last.x, point.y - last.y) > 3) {
+      current.points.push(point)
+      setKnifePath([...current.points])
+    }
+  }
+
+  const onPointerUpCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const current = knife.current
+    if (!current) return
+    e.stopPropagation()
+    knife.current = null
+    if (e.currentTarget.hasPointerCapture(current.pointerId)) e.currentTarget.releasePointerCapture(current.pointerId)
+    setKnifePath(null)
+    const rect = containerRef.current!.getBoundingClientRect()
+    const stroke = current.points.map((p) => flow.screenToFlowPosition({ x: p.x + rect.left, y: p.y + rect.top }))
+    const positions = new Map(nodesRef.current.map((n) => [n.id, n.position]))
+    const { width: w, height: h } = size
+    const cut = Object.values(project.snapshot().links).filter((link) => {
+      const a = positions.get(link.from)
+      const b = positions.get(link.to)
+      if (!a || !b) return false
+      const from = { x: a.x + w, y: a.y + h / 2 }
+      const to = { x: b.x, y: b.y + h / 2 }
+      return stroke.some((p, i) => i > 0 && segmentsCross(stroke[i - 1]!, p, from, to))
+    })
+    if (cut.length) {
+      project.deleteLinks(cut.map((l) => l.id))
+      toast(`Cut ${cut.length} ${cut.length === 1 ? 'link' : 'links'}. Ctrl+Z brings them back.`)
+    }
+  }
+
+  const onContextMenuCapture = (e: ReactMouseEvent) => {
+    if (suppressContextMenu.current || e.ctrlKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      suppressContextMenu.current = false
+    }
+  }
+
   // ------------------------------------------------------ keyboard, paste
 
   useEffect(() => {
@@ -399,7 +629,10 @@ function BoardView({ cutId }: { cutId: string }) {
         e.preventDefault()
         if (e.shiftKey) addVariation(only)
         else insertAfter(only)
+      } else if (e.key.toLowerCase() === 'k' && !e.shiftKey) {
+        setKnifeMode((on) => !on)
       } else if (e.key === 'Escape') {
+        setKnifeMode(false)
         setNodes((current) => current.map((n) => (n.selected ? { ...n, selected: false } : n)))
         setSelectedLinkId(null)
       }
@@ -439,7 +672,17 @@ function BoardView({ cutId }: { cutId: string }) {
 
   return (
     <div className="flex h-full min-h-0">
-      <div ref={containerRef} className="relative min-w-0 flex-1" onDragOver={onPaneDragOver} onDrop={onPaneDrop}>
+      <div
+        ref={containerRef}
+        className="relative min-w-0 flex-1"
+        style={{ cursor: knifeMode ? 'crosshair' : undefined }}
+        onDragOver={onPaneDragOver}
+        onDrop={onPaneDrop}
+        onPointerDownCapture={onPointerDownCapture}
+        onPointerMoveCapture={onPointerMoveCapture}
+        onPointerUpCapture={onPointerUpCapture}
+        onContextMenuCapture={onContextMenuCapture}
+      >
         <BoardActionsContext.Provider value={actions}>
           <ReactFlow<FrameNodeType, LinkEdgeType>
             nodes={nodes}
@@ -450,10 +693,17 @@ function BoardView({ cutId }: { cutId: string }) {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onConnectEnd={onConnectEnd}
+            onEdgeClick={onEdgeClick}
+            onNodeDrag={onNodeDrag}
             onNodeDragStop={onNodeDragStop}
             onDelete={onDelete}
             onPaneClick={() => setSelectedLinkId(null)}
             deleteKeyCode={['Delete', 'Backspace']}
+            zoomOnDoubleClick={false}
+            panOnDrag={!knifeMode}
+            nodesDraggable={!knifeMode}
+            nodesConnectable={!knifeMode}
+            elementsSelectable={!knifeMode}
             colorMode={theme}
             minZoom={0.1}
             maxZoom={2}
@@ -488,9 +738,23 @@ function BoardView({ cutId }: { cutId: string }) {
                 <span className="mx-0.5 h-5 w-px bg-line" />
                 <IconButton
                   size="sm"
-                  label={auto ? 'Auto-arrange is on' : 'Tidy: arrange frames automatically'}
+                  label="Cut links"
+                  tooltip={
+                    <span>
+                      Cut links: drag across them <Kbd>K</Kbd>, or <Kbd>Ctrl</Kbd> + right-drag
+                    </span>
+                  }
+                  active={knifeMode}
+                  onClick={() => setKnifeMode((on) => !on)}
+                >
+                  <Scissors size={15} />
+                </IconButton>
+                <IconButton
+                  size="sm"
+                  label={auto ? 'Auto-arrange is on' : 'Auto-arrange is off'}
+                  tooltip={auto ? 'Auto-arrange is on. Click to place frames freely.' : 'Auto-arrange is off. Click to tidy up.'}
                   active={auto}
-                  onClick={() => project.updateMeta({ autoLayout: true })}
+                  onClick={toggleAutoLayout}
                 >
                   <LayoutGrid size={15} />
                 </IconButton>
@@ -502,7 +766,12 @@ function BoardView({ cutId }: { cutId: string }) {
                   <Maximize size={15} />
                 </IconButton>
               </div>
-              {blank && (
+              {knifeMode && (
+                <div className="rounded-lg border border-danger/40 bg-panel px-3 py-2 text-[12px] text-fg-2 shadow-pop">
+                  Drag across links to cut them. <Kbd>Esc</Kbd> to stop.
+                </div>
+              )}
+              {blank && !knifeMode && (
                 <div className="max-w-[300px] rounded-lg border border-line bg-panel px-3.5 py-3 text-fg-2 shadow-pop">
                   <p className="font-medium text-fg">Start with your first shot</p>
                   <p className="mt-1">
@@ -514,8 +783,21 @@ function BoardView({ cutId }: { cutId: string }) {
             </Panel>
           </ReactFlow>
         </BoardActionsContext.Provider>
+        {knifePath && knifePath.length > 1 && (
+          <svg className="pointer-events-none absolute inset-0 z-10 size-full" aria-hidden>
+            <polyline
+              points={knifePath.map((p) => `${p.x},${p.y}`).join(' ')}
+              fill="none"
+              stroke="var(--danger)"
+              strokeWidth={2}
+              strokeDasharray="6 4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
       </div>
-      <aside className={cx('w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel')}>
+      <aside className="w-[340px] shrink-0 overflow-y-auto border-l border-line bg-panel">
         <Inspector cutId={cutId} frameIds={selectedFrameIds} linkId={selectedLinkId} onFrameCreated={selectFrame} />
       </aside>
     </div>

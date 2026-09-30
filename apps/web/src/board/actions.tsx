@@ -3,8 +3,14 @@ import { createContext, useContext } from 'react'
 /** Board-level actions that frame cards and link labels can trigger. */
 export interface BoardActions {
   insertAfter(frameId: string): void
+  insertBefore(frameId: string): void
   addVariation(frameId: string): void
+  /** Cuts all of a frame's links, keeping the frames around it connected. */
+  detach(frameId: string): void
+  remove(frameId: string): void
+  toggleHidden(frameId: string): void
   selectLink(linkId: string): void
+  cutLink(linkId: string): void
   importToFrame(frameId: string, files: File[], target: 'media' | 'references'): void
 }
 

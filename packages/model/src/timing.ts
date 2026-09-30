@@ -1,5 +1,7 @@
 import { linearize, type CutItem } from './cut'
-import type { FrameSnapshot, ProjectMeta, ProjectSnapshot } from './types'
+import type { AssetSnapshot, FrameSnapshot, ProjectMeta, ProjectSnapshot } from './types'
+
+type Assets = Readonly<Record<string, AssetSnapshot>>
 
 /** Breathing room added to VO-based durations. */
 export const VO_PADDING_SECONDS = 0.5
@@ -21,15 +23,26 @@ export function voWordCount(frame: FrameSnapshot): number {
   return words
 }
 
-/** Duration from spoken words, or the frame's own duration when nothing is spoken. */
-export function autoDuration(frame: FrameSnapshot, wordsPerSecond: number): number {
-  const words = voWordCount(frame)
-  if (words === 0 || wordsPerSecond <= 0) return frame.duration
-  return Math.max(MIN_AUTO_SECONDS, round2(words / wordsPerSecond + VO_PADDING_SECONDS))
+/** Seconds of speech in a frame: recorded audio where there is some, otherwise estimated from words. */
+export function spokenSeconds(frame: FrameSnapshot, wordsPerSecond: number, assets?: Assets): number {
+  let seconds = 0
+  for (const line of frame.audio) {
+    const recorded = line.assetId ? assets?.[line.assetId]?.duration : null
+    if (recorded) seconds += recorded
+    else if (wordsPerSecond > 0) seconds += countWords(line.text) / wordsPerSecond
+  }
+  return seconds
 }
 
-export function baseDuration(frame: FrameSnapshot, meta: ProjectMeta): number {
-  return frame.durationMode === 'manual' ? frame.duration : autoDuration(frame, meta.wordsPerSecond)
+/** Duration from the voiceover (recorded or estimated), or the frame's own duration when nothing is spoken. */
+export function autoDuration(frame: FrameSnapshot, wordsPerSecond: number, assets?: Assets): number {
+  const spoken = spokenSeconds(frame, wordsPerSecond, assets)
+  if (spoken <= 0) return frame.duration
+  return Math.max(MIN_AUTO_SECONDS, round2(spoken + VO_PADDING_SECONDS))
+}
+
+export function baseDuration(frame: FrameSnapshot, meta: ProjectMeta, assets?: Assets): number {
+  return frame.durationMode === 'manual' ? frame.duration : autoDuration(frame, meta.wordsPerSecond, assets)
 }
 
 export interface TimelineItem extends CutItem {
@@ -69,7 +82,7 @@ export function cutTimeline(s: ProjectSnapshot, cutId: string): Timeline {
     if (!frame) continue
     const override = cut?.overrides[item.frameId]
     const overridden = override !== undefined
-    const base = overridden ? override : baseDuration(frame, s.meta)
+    const base = overridden ? override : baseDuration(frame, s.meta, s.assets)
     const hidden = cut?.hidden[item.frameId] === true
     const duration = hidden ? 0 : base
     const entry: TimelineItem = { ...item, start: round2(t), duration, base, hidden, overridden }

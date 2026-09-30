@@ -115,6 +115,8 @@ export interface AudioLine {
   speaker: string
   text: string
   lang: string
+  /** Recorded or generated audio for this line. */
+  assetId: string | null
 }
 
 export interface MediaVersion {
@@ -173,6 +175,10 @@ export interface CutSnapshot {
   hidden: Record<string, boolean>
   /** Frame id -> duration in seconds, for this cut only. */
   overrides: Record<string, number>
+  /** Music bed for this cut; `offset` is where in the cut the track starts (seconds). */
+  music: { assetId: string; offset: number; volume: number } | null
+  /** Beat markers in seconds, sorted. */
+  beats: number[]
 }
 
 export interface SceneSnapshot {

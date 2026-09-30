@@ -93,6 +93,7 @@ export function readAudioLine(m: YMap): AudioLine {
     speaker: str(m.get('speaker')),
     text: text(m.get('text')),
     lang: str(m.get('lang'), 'en'),
+    assetId: optStr(m.get('assetId')),
   }
 }
 
@@ -166,7 +167,23 @@ export function readCut(m: YMap): CutSnapshot {
     choices: record(m.get('choices'), isString),
     hidden: record(m.get('hidden'), isTrue),
     overrides: record(m.get('overrides'), isNumber),
+    music: readMusic(m),
+    beats: readBeats(m.get('beats')),
   }
+}
+
+function readMusic(m: YMap): CutSnapshot['music'] {
+  const assetId = optStr(m.get('musicAssetId'))
+  if (!assetId) return null
+  return { assetId, offset: num(m.get('musicOffset')), volume: num(m.get('musicVolume'), 0.8) }
+}
+
+function readBeats(v: unknown): number[] {
+  if (!(v instanceof Y.Array)) return []
+  return v
+    .toArray()
+    .filter(isNumber)
+    .sort((a, b) => a - b)
 }
 
 export function readScene(m: YMap): SceneSnapshot {
