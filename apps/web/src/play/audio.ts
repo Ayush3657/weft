@@ -1,6 +1,6 @@
 import type { AssetSnapshot, AudioClip } from '@weft/model'
 import { useEffect, useRef } from 'react'
-import { mediaUrl } from '../lib/media'
+import { displayUrl } from '../lib/media'
 import type { PlaybackClock } from './clock'
 
 /** Keeps one audio element per clip playing in step with the clock. */
@@ -28,7 +28,7 @@ export function useAudioSync(
     }
     for (const [key, clip] of wanted) {
       if (els.has(key)) continue
-      const el = new Audio(mediaUrl(assets[clip.assetId]!.hash!))
+      const el = new Audio(displayUrl(assets[clip.assetId]!.hash!))
       el.preload = 'auto'
       els.set(key, el)
     }

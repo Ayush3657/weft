@@ -50,7 +50,7 @@ import { useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
 import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { addLink, singleUrl } from '../lib/links'
-import { importFiles, mediaFiles } from '../lib/media'
+import { displayUrl, importFiles, mediaFiles } from '../lib/media'
 import { useTheme } from '../lib/prefs'
 import { writePath } from '../lib/router'
 import { toast } from '../lib/toast'
@@ -547,7 +547,7 @@ function AssetBody({ item, asset, selected }: { item: MoodItemSnapshot; asset: A
           <AudioLines size={15} className="text-accent-strong" aria-hidden />
           <span className="truncate">{asset.name || 'Audio'}</span>
         </div>
-        {asset.hash && <audio src={`/api/media/${asset.hash}`} controls preload="metadata" className="nodrag h-8 w-full" />}
+        {asset.hash && <audio src={displayUrl(asset.hash)} controls preload="metadata" className="nodrag h-8 w-full" />}
       </div>
     )
   }

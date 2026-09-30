@@ -20,7 +20,7 @@ import {
 } from 'react'
 import { cx } from '../lib/cx'
 import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
-import { mediaFiles, mediaUrl } from '../lib/media'
+import { displayUrl, mediaFiles } from '../lib/media'
 import { useProject } from '../project/hooks'
 import { Button, IconButton, Kbd } from '../ui'
 import type { PlaybackClock } from './clock'
@@ -439,10 +439,10 @@ function PictureClip({
       title={`${label} · ${formatDuration(item.duration)}${frame?.description ? ` · ${frame.description}` : ''}`}
     >
       {hero?.hash && hero.kind === 'image' && (
-        <img src={mediaUrl(hero.hash)} alt="" draggable={false} className="h-full w-[88px] shrink-0 object-cover" />
+        <img src={displayUrl(hero.hash)} alt="" draggable={false} className="h-full w-[88px] shrink-0 object-cover" />
       )}
       {hero?.hash && hero.kind === 'video' && (
-        <video src={mediaUrl(hero.hash)} muted preload="metadata" className="h-full w-[88px] shrink-0 object-cover" />
+        <video src={displayUrl(hero.hash)} muted preload="metadata" className="h-full w-[88px] shrink-0 object-cover" />
       )}
       <div className="min-w-0 flex-1 px-1.5 py-1">
         <div className="flex items-center gap-1 text-[10.5px] font-semibold text-fg tabular-nums">

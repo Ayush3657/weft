@@ -1,6 +1,7 @@
-import type { AssetKind, Project } from '@weft/model'
+import { Project, type AssetKind } from '@weft/model'
 import { createSHA256 } from 'hash-wasm'
-import { api } from './api'
+import { useSyncExternalStore } from 'react'
+import { ApiError, api } from './api'
 import { toast } from './toast'
 
 export const mediaUrl = (hash: string) => `/api/media/${hash}`
@@ -26,19 +27,131 @@ async function hashFile(file: Blob): Promise<string> {
   return hasher.digest('hex')
 }
 
+// ------------------------------------------------------ files kept in memory
+
+/**
+ * Files added in this browser are shown straight from memory, so they appear
+ * the moment they're dropped or pasted while the upload runs in the background.
+ */
+const local = new Map<string, { url: string; size: number }>()
+/** Oldest uploaded files are let go past this, and load from the server instead. */
+const LOCAL_BUDGET = 512 * 1024 * 1024
+
+function keepLocal(hash: string, file: File): void {
+  if (local.has(hash)) return
+  local.set(hash, { url: URL.createObjectURL(file), size: file.size })
+  let total = [...local.values()].reduce((n, entry) => n + entry.size, 0)
+  for (const [key, entry] of local) {
+    if (total <= LOCAL_BUDGET) break
+    if (key === hash || uploads.has(key)) continue
+    URL.revokeObjectURL(entry.url)
+    local.delete(key)
+    total -= entry.size
+  }
+}
+
+/** Where to load a file for display: from memory if it was added here, otherwise from the server. */
+export function displayUrl(hash: string): string {
+  return local.get(hash)?.url ?? mediaUrl(hash)
+}
+
+// ------------------------------------------------------------------ uploads
+
+const uploads = new Map<string, Promise<void>>()
+let uploadingSnapshot: ReadonlySet<string> = new Set()
+const listeners = new Set<() => void>()
+
+function changed() {
+  uploadingSnapshot = new Set(uploads.keys())
+  for (const listener of [...listeners]) listener()
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/** Hashes of files this browser is still uploading. */
+export function useUploading(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribe, () => uploadingSnapshot)
+}
+
+// Leaving mid-upload would leave the project pointing at files the server never got.
+window.addEventListener('beforeunload', (e) => {
+  if (!uploads.size) return
+  e.preventDefault()
+  e.returnValue = ''
+})
+
+class UploadError extends Error {
+  readonly retryable: boolean
+
+  constructor(message: string, retryable: boolean) {
+    super(message)
+    this.retryable = retryable
+  }
+}
+
+async function putFile(file: File, hash: string): Promise<void> {
+  const { exists } = await api<{ exists: boolean }>(`/api/media/${hash}/exists`)
+  if (exists) return
+  const res = await fetch(mediaUrl(hash), {
+    method: 'PUT',
+    headers: { 'content-type': file.type },
+    body: file,
+    credentials: 'same-origin',
+  })
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new UploadError(data.error ?? `Upload failed (${res.status})`, res.status >= 500 || res.status === 408 || res.status === 429)
+  }
+}
+
+const isRetryable = (error: unknown) =>
+  error instanceof UploadError ? error.retryable : error instanceof ApiError ? error.status >= 500 : true
+
+/** Uploads a file once (however many times it's added), retrying brief network trouble. */
+function upload(file: File, hash: string): Promise<void> {
+  const running = uploads.get(hash)
+  if (running) return running
+  const task = (async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await putFile(file, hash)
+      } catch (error) {
+        if (attempt >= 3 || !isRetryable(error)) throw error
+        await new Promise((resolve) => setTimeout(resolve, 800 * 2 ** attempt))
+      }
+    }
+  })().finally(() => {
+    uploads.delete(hash)
+    changed()
+  })
+  uploads.set(hash, task)
+  changed()
+  return task
+}
+
+// -------------------------------------------------------------------- import
+
 export interface MediaMeta {
   width?: number | null
   height?: number | null
   duration?: number | null
 }
 
-async function probe(file: File, kind: Exclude<AssetKind, 'link'>): Promise<MediaMeta> {
-  const url = URL.createObjectURL(file)
+/** Size and length, read from the file's header rather than decoding it all. */
+async function probe(url: string, kind: Exclude<AssetKind, 'link'>): Promise<MediaMeta> {
   try {
     if (kind === 'image') {
       const img = new Image()
-      img.src = url
-      await img.decode()
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('Unreadable image'))
+        img.src = url
+      })
       return { width: img.naturalWidth, height: img.naturalHeight }
     }
     const el = document.createElement(kind === 'video' ? 'video' : 'audio')
@@ -49,54 +162,54 @@ async function probe(file: File, kind: Exclude<AssetKind, 'link'>): Promise<Medi
       el.onerror = () => reject(new Error('Unreadable media'))
     })
     const duration = Number.isFinite(el.duration) ? el.duration : null
-    if (el instanceof HTMLVideoElement) return { width: el.videoWidth, height: el.videoHeight, duration }
-    return { duration }
+    const meta = el instanceof HTMLVideoElement ? { width: el.videoWidth, height: el.videoHeight, duration } : { duration }
+    el.removeAttribute('src')
+    return meta
   } catch {
     return {}
-  } finally {
-    URL.revokeObjectURL(url)
   }
 }
 
+/** Clipboard pictures all arrive as "image.png"; name them so they can be told apart in the Library. */
+function assetName(file: File): string {
+  if (!/^image\.(png|jpe?g|gif|webp|bmp)$/i.test(file.name)) return file.name
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return `Pasted image ${time}`
+}
+
 /**
- * Uploads a file (skipping it if the server already has it) and adds it to the
- * project's library. `known` fills in what the file can't tell us, like the
- * length of a fresh recording.
+ * Adds a file to the project's library. It's ready to use as soon as it's
+ * hashed: this browser shows it from memory while it uploads in the
+ * background (skipped if the server already has it). If the upload fails for
+ * good, the file is taken back out. `known` fills in what the file can't tell
+ * us, like the length of a fresh recording.
  */
 export async function importFile(project: Project, file: File, userId: string, known: MediaMeta = {}): Promise<string> {
   const kind = fileKind(file.type)
   if (!kind) throw new Error(`${file.name || 'That file'} isn't an image, video or audio file`)
   const hash = await hashFile(file)
-  const { exists } = await api<{ exists: boolean }>(`/api/media/${hash}/exists`)
-  if (!exists) {
-    const res = await fetch(mediaUrl(hash), {
-      method: 'PUT',
-      headers: { 'content-type': file.type },
-      body: file,
-      credentials: 'same-origin',
-    })
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      throw new Error(data.error ?? `Couldn't upload ${file.name}`)
-    }
-  }
-  const probed = await probe(file, kind)
-  const meta: MediaMeta = {
-    width: known.width ?? probed.width,
-    height: known.height ?? probed.height,
-    duration: known.duration ?? probed.duration,
-  }
-  return project.addAsset({
+  const name = assetName(file)
+  keepLocal(hash, file)
+  const probed = await probe(displayUrl(hash), kind)
+  const isNew = ![...project.assets.values()].some((m) => m.get('hash') === hash)
+  const assetId = project.addAsset({
     kind,
     hash,
-    name: file.name,
+    name,
     mime: file.type,
     size: file.size,
-    width: meta.width ?? null,
-    height: meta.height ?? null,
-    duration: meta.duration ?? null,
+    width: known.width ?? probed.width ?? null,
+    height: known.height ?? probed.height ?? null,
+    duration: known.duration ?? probed.duration ?? null,
     createdBy: userId,
   })
+  upload(file, hash).catch((error: unknown) => {
+    // Without its file the asset would show as missing for everyone.
+    if (isNew && project.assets.has(assetId)) new Project(project.doc, { source: 'upload' }).deleteAsset(assetId)
+    const reason = error instanceof Error && error.message ? ` (${error.message})` : ''
+    toast(`${name || 'A file'} didn't upload${reason}, so it was taken out. Try adding it again.`, 'error')
+  })
+  return assetId
 }
 
 /** Imports several files, reporting failures as toasts. Returns the asset ids that worked. */

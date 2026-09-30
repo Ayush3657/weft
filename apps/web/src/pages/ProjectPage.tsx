@@ -4,6 +4,7 @@ import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from 'rea
 import { Board } from '../board/Board'
 import { Library } from '../library/Library'
 import { cx } from '../lib/cx'
+import { useUploading } from '../lib/media'
 import { usePref } from '../lib/prefs'
 import { navigate, projectPath, type Workspace, type WriteLocation } from '../lib/router'
 import { useProject, useSnapshot, useSyncStatus, useUndoShortcuts } from '../project/hooks'
@@ -322,17 +323,20 @@ function LengthMeter({ cutId }: { cutId: string }) {
 
 function SyncIndicator() {
   const status = useSyncStatus()
-  const label = {
-    connecting: 'Connecting…',
-    saving: 'Saving…',
-    saved: 'Saved',
-    offline: 'Offline. Changes are kept on this device.',
-  }[status]
+  const uploading = useUploading().size
+  const label = uploading
+    ? `Uploading ${uploading} ${uploading === 1 ? 'file' : 'files'}. Keep this tab open until it's done.`
+    : {
+        connecting: 'Connecting…',
+        saving: 'Saving…',
+        saved: 'Saved',
+        offline: 'Offline. Changes are kept on this device.',
+      }[status]
   return (
     <span
       className={cx(
         'flex size-8 items-center justify-center rounded-md',
-        status === 'offline' ? 'text-warn' : status === 'saved' ? 'text-fg-3' : 'text-fg-2',
+        status === 'offline' ? 'text-warn' : status === 'saved' && !uploading ? 'text-fg-3' : 'text-fg-2',
       )}
       title={label}
       aria-label={label}
@@ -340,7 +344,7 @@ function SyncIndicator() {
     >
       {status === 'offline' ? (
         <CloudOff size={15} />
-      ) : status === 'saved' ? (
+      ) : status === 'saved' && !uploading ? (
         <Check size={15} />
       ) : (
         <Loader2 size={15} className="animate-spin" />

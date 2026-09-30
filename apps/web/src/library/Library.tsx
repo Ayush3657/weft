@@ -1,13 +1,13 @@
 import { assetUsage, formatDuration, notesUsage, type AssetKind, type AssetSnapshot, type Usage } from '@weft/model'
 import { AudioLines, ExternalLink, Link2, Plus, Search, Trash2, Upload, X } from 'lucide-react'
-import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type ClipboardEvent, type DragEvent, type FormEvent } from 'react'
 import { revealOnBoard } from '../board/actions'
 import { MediaFill } from '../board/Media'
 import { useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
 import { isAssetDrag, startAssetDrag } from '../lib/dnd'
-import { addLink } from '../lib/links'
-import { importFiles, mediaFiles, mediaUrl } from '../lib/media'
+import { addLink, singleUrl } from '../lib/links'
+import { importFiles, mediaFiles, mediaUrl, useUploading } from '../lib/media'
 import { navigate, projectPath, writePath } from '../lib/router'
 import { useProject, useSnapshot } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
@@ -93,6 +93,7 @@ export function Library({ onClose }: { onClose: () => void }) {
   const [dropping, setDropping] = useState(false)
   const usage = assetUsage(s)
   const notes = useNotesUsage()
+  const uploading = useUploading()
   const usesOf = (id: string) => [...(usage.get(id) ?? []), ...(notes.get(id) ?? [])]
 
   const all = useMemo(() => Object.values(s.assets).sort((a, b) => b.createdAt - a.createdAt), [s.assets])
@@ -120,10 +121,24 @@ export function Library({ onClose }: { onClose: () => void }) {
     void importFiles(project, files, user.id)
   }
 
+  // Pasting while the Library has focus adds to the Library, not to the board or moodboard behind it.
+  const onPaste = (e: ClipboardEvent) => {
+    if (e.target instanceof HTMLElement && e.target.closest('input, textarea')) return
+    const files = mediaFiles(e.clipboardData)
+    const url = files.length ? null : singleUrl(e.clipboardData.getData('text/plain'))
+    if (!files.length && !url) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (files.length) void importFiles(project, files, user.id)
+    else if (url) addLink(project, url, user.id)
+  }
+
   return (
     <aside
       aria-label="Library"
-      className={cx('flex w-[300px] shrink-0 flex-col border-l border-line bg-panel', dropping && 'ring-2 ring-accent ring-inset')}
+      tabIndex={-1}
+      className={cx('flex w-[300px] shrink-0 flex-col border-l border-line bg-panel focus:outline-none', dropping && 'ring-2 ring-accent ring-inset')}
+      onPaste={onPaste}
       onDragOver={onDragOver}
       onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDropping(false)}
       onDrop={onDrop}
@@ -157,6 +172,7 @@ export function Library({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-2">
             {shown.map((asset) => {
               const uses = usesOf(asset.id).length
+              const pending = !!asset.hash && uploading.has(asset.hash)
               return (
                 <button
                   key={asset.id}
@@ -176,8 +192,8 @@ export function Library({ onClose }: { onClose: () => void }) {
                   </span>
                   <span className="block px-2 py-1.5">
                     <span className="block truncate text-[12px] text-fg">{assetLabel(asset)}</span>
-                    <span className={cx('block text-[11px]', uses ? 'text-fg-3' : 'text-warn')}>
-                      {uses ? `Used ${uses === 1 ? 'once' : `${uses} times`}` : 'Unused'}
+                    <span className={cx('block text-[11px]', uses || pending ? 'text-fg-3' : 'text-warn')}>
+                      {pending ? 'Uploading…' : uses ? `Used ${uses === 1 ? 'once' : `${uses} times`}` : 'Unused'}
                     </span>
                   </span>
                 </button>
@@ -189,7 +205,7 @@ export function Library({ onClose }: { onClose: () => void }) {
             <p>
               {all.length
                 ? 'Nothing matches.'
-                : 'Everything you add anywhere in the project lands here. Drop files on this panel to add them.'}
+                : 'Everything you add anywhere in the project lands here. Drop or paste files on this panel to add them.'}
             </p>
             {!all.length && (
               <Button size="sm" icon={<Upload size={14} />} onClick={picker.open}>

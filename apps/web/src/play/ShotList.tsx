@@ -11,7 +11,7 @@ import {
 import { Eye, EyeOff, Film, Loader2, Mic, Square, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef } from 'react'
 import { cx } from '../lib/cx'
-import { mediaUrl } from '../lib/media'
+import { displayUrl } from '../lib/media'
 import { BoundTextarea } from '../project/BoundText'
 import { useProject } from '../project/hooks'
 import { IconButton } from '../ui'
@@ -152,8 +152,8 @@ const ShotRow = memo(function ShotRow({
       )}
     >
       <div className="mt-0.5 h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border border-line bg-media">
-        {hero?.hash && hero.kind === 'image' && <img src={mediaUrl(hero.hash)} alt="" className="size-full object-cover" draggable={false} />}
-        {hero?.hash && hero.kind === 'video' && <video src={mediaUrl(hero.hash)} muted preload="metadata" className="size-full object-cover" />}
+        {hero?.hash && hero.kind === 'image' && <img src={displayUrl(hero.hash)} alt="" className="size-full object-cover" draggable={false} />}
+        {hero?.hash && hero.kind === 'video' && <video src={displayUrl(hero.hash)} muted preload="metadata" className="size-full object-cover" />}
         {!hero?.hash && (
           <div className="flex size-full items-center justify-center text-fg-3">
             <Film size={16} aria-hidden />

@@ -10,7 +10,7 @@ import {
   type ProjectSnapshot,
 } from '@weft/model'
 import { memo, useEffect, useRef } from 'react'
-import { mediaUrl } from '../lib/media'
+import { displayUrl } from '../lib/media'
 import { useClockTime, type PlaybackClock } from './clock'
 
 export interface Overlays {
@@ -128,7 +128,7 @@ const StageLayer = memo(function StageLayer({
       style={{ opacity: layer.opacity, clipPath: layer.reveal < 1 ? `inset(0 ${(1 - layer.reveal) * 100}% 0 0)` : undefined }}
     >
       {hero?.hash && hero.kind === 'image' && (
-        <img src={mediaUrl(hero.hash)} alt="" draggable={false} className="size-full object-cover" style={{ transform }} />
+        <img src={displayUrl(hero.hash)} alt="" draggable={false} className="size-full object-cover" style={{ transform }} />
       )}
       {hero?.hash && hero.kind === 'video' && <StageVideo hash={hero.hash} item={item} clock={clock} />}
       {!hero?.hash && <Slate label={label} frame={frame} />}
@@ -160,7 +160,7 @@ function StageVideo({ hash, item, clock }: { hash: string; item: PlayItem; clock
     sync()
     return clock.subscribe(sync)
   }, [clock, item.start, item.duration])
-  return <video ref={ref} src={mediaUrl(hash)} muted playsInline preload="auto" className="size-full object-cover" />
+  return <video ref={ref} src={displayUrl(hash)} muted playsInline preload="auto" className="size-full object-cover" />
 }
 
 /** Stand-in for a frame without an image, so the animatic still reads. */

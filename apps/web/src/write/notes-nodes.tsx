@@ -3,7 +3,7 @@ import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from 
 import { readAsset, type AssetKind, type Project } from '@weft/model'
 import { ExternalLink, ImageOff } from 'lucide-react'
 import { cx } from '../lib/cx'
-import { mediaUrl } from '../lib/media'
+import { displayUrl, mediaUrl } from '../lib/media'
 import { useSnapshot } from '../project/hooks'
 
 export function hostOf(url: string): string {
@@ -68,7 +68,7 @@ function MediaView({ node }: ReactNodeViewProps) {
   const s = useSnapshot()
   const { assetId, kind, src, alt } = node.attrs as { assetId: string | null; kind: AssetKind; src: string | null; alt: string }
   const asset = assetId ? s.assets[assetId] : undefined
-  const url = asset?.hash ? mediaUrl(asset.hash) : src
+  const url = asset?.hash ? displayUrl(asset.hash) : src
   return (
     <NodeViewWrapper className="weft-media">
       <figure contentEditable={false} data-drag-handle>
