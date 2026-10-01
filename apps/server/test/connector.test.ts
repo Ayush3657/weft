@@ -7,6 +7,7 @@ import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { strFromU8, unzipSync } from 'fflate'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -29,6 +30,7 @@ let server: Running
 let base = ''
 let token = ''
 let projectId = ''
+let cookie = ''
 let client: Client
 
 beforeAll(async () => {
@@ -41,7 +43,7 @@ beforeAll(async () => {
     headers: { 'content-type': 'application/json', origin },
     body: JSON.stringify({ name: 'Ayush', email: 'ayush@example.com' }),
   })
-  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
+  cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? ''
   const post = (pathname: string, body: unknown) =>
     fetch(`${base}${pathname}`, { method: 'POST', headers: { 'content-type': 'application/json', origin, cookie }, body: JSON.stringify(body) }).then(
       (r) => r.json() as Promise<Record<string, unknown>>,
@@ -148,5 +150,77 @@ describe('the Weft connector', () => {
     expect(textOf(up)).toContain('Render test')
     await early.close()
     await second.close()
+  }, 20000)
+})
+
+describe('Weft for Claude, the extension for other computers', () => {
+  type Manifest = {
+    user_config: Record<string, { default?: string; sensitive?: boolean; required?: boolean }>
+    server: { mcp_config: { args: string[]; env: Record<string, string> } }
+  }
+  let dir = ''
+  let manifest: Manifest
+
+  beforeAll(async () => {
+    const res = await fetch(`${base}/api/connect/extension`, { headers: { cookie } })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-disposition')).toContain('Weft.mcpb')
+    const files = unzipSync(new Uint8Array(await res.arrayBuffer()))
+    expect(Object.keys(files).sort()).toEqual(['icon.png', 'manifest.json', 'server/weft-mcp.mjs'])
+    dir = path.join(dataDir, 'extension')
+    for (const [name, data] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+      writeFileSync(path.join(dir, name), data)
+    }
+    manifest = JSON.parse(strFromU8(files['manifest.json']!)) as Manifest
+  })
+
+  /** Starts the extension the way Claude Desktop does, with what the person typed into its settings. */
+  async function install(typed: Record<'weft_url' | 'weft_key', string>) {
+    const fill = (text: string) => text.replaceAll('${__dirname}', dir).replace(/\$\{user_config\.(\w+)\}/g, (_, key: 'weft_url' | 'weft_key') => typed[key])
+    const { args, env } = manifest.server.mcp_config
+    const claude = new Client({ name: 'claude-desktop-test', version: '1.0.0' })
+    await claude.connect(
+      new StdioClientTransport({
+        // Claude Desktop runs it with its own Node.
+        command: process.execPath,
+        args: args.map(fill),
+        env: { ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, fill(v)])), WEFT_CONNECTOR_FILE: path.join(dataDir, 'other', 'connector.json') },
+        stderr: 'pipe',
+      }),
+    )
+    return claude
+  }
+  const listProjects = async (claude: Client) => (await claude.callTool({ name: 'list_projects', arguments: {} })) as ToolResult
+
+  it('asks for the address (filled in) and the key (kept secret), then works with them', async () => {
+    expect(manifest.user_config.weft_url).toMatchObject({ required: true })
+    expect(manifest.user_config.weft_url!.default).toMatch(/^http:\/\//)
+    expect(manifest.user_config.weft_key).toMatchObject({ required: true, sensitive: true })
+    const claude = await install({ weft_url: base, weft_key: token })
+    expect(textOf(await listProjects(claude))).toContain('Render test')
+    await claude.close()
+  })
+
+  it("explains a key that doesn't work in terms of Claude's settings for the extension", async () => {
+    const claude = await install({ weft_url: base, weft_key: 'weft_not-a-real-key' })
+    const result = await listProjects(claude)
+    expect(result.isError).toBe(true)
+    expect(textOf(result)).toContain("doesn't recognise")
+    expect(textOf(result)).toContain('Extensions')
+    await claude.close()
+  })
+
+  it("says to check the computer that hosts Weft when it can't be reached", async () => {
+    const elsewhere = Object.values(os.networkInterfaces())
+      .flat()
+      .find((a) => a?.family === 'IPv4' && !a.internal)?.address
+    if (!elsewhere) return
+    // A closed port at this computer's network address stands in for a teammate's computer that's off.
+    const claude = await install({ weft_url: `http://${elsewhere}:9`, weft_key: token })
+    const result = await listProjects(claude)
+    expect(result.isError).toBe(true)
+    expect(textOf(result)).toContain('computer that hosts it')
+    await claude.close()
   }, 20000)
 })

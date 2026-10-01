@@ -1,5 +1,5 @@
-import { Check, CheckCircle2, Copy, KeyRound, Laptop, Plug, Trash2, Unplug } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Check, CheckCircle2, Copy, Download, KeyRound, Laptop, Plug, Trash2, Unplug } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../lib/api'
 import { cx } from '../lib/cx'
 import { toast, toastError } from '../lib/toast'
@@ -7,6 +7,10 @@ import { Button, IconButton, Modal, Segmented } from '../ui'
 
 interface Setup {
   serverUrl: string
+  /** Where teammates open Weft; null while it's only open on the computer it runs on. */
+  teamUrl: string | null
+  /** The address Claude on another computer should use. */
+  otherUrl: string
   connectorPath: string
   connectorBuilt: boolean
   nodePath: string
@@ -26,7 +30,6 @@ interface ConfigChange {
 }
 
 type Where = 'here' | 'elsewhere'
-type App = 'desktop' | 'code'
 
 function CopyBlock({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false)
@@ -143,7 +146,7 @@ export function ConnectClaude({ open, onOpenChange }: { open: boolean; onOpenCha
             onDisconnect={() => void disconnectHere()}
           />
         ) : (
-          setup && <ElsewhereSetup setup={setup} onKeyMade={() => void load()} />
+          setup && <ElsewhereSetup setup={setup} onWeftComputer={!!here} onKeyMade={() => void load()} />
         )}
 
         {tokens.length > 0 && (
@@ -201,7 +204,7 @@ function HereSetup({
           </p>
           <p className="mt-0.5 text-fg-2">
             {here.connected
-              ? `Claude Desktop${here.desktopHasWeft ? ' has Weft in its settings' : " doesn't have Weft in its settings yet"}. Connecting again makes a new key and replaces the old one.`
+              ? `Claude Desktop${here.desktopHasWeft ? ' has Weft in its settings' : " doesn't have Weft in its settings yet"}. Whichever Claude account is signed in to Claude here, it works in Weft as you. Connecting again makes a new key and replaces the old one.`
               : "Weft makes a key for Claude (you can revoke it here), saves it in your user folder where the Weft connector finds it, and adds Weft to Claude Desktop's settings. The key never goes into Claude's settings."}
           </p>
           <div className="mt-3 flex gap-2">
@@ -258,18 +261,19 @@ function HereSetup({
   )
 }
 
-function ElsewhereSetup({ setup, onKeyMade }: { setup: Setup; onKeyMade: () => void }) {
-  const [app, setApp] = useState<App>('desktop')
+/**
+ * Claude on a teammate's computer (or another of yours): the "Weft for
+ * Claude" extension and a key of your own. Each person does this from their
+ * own computer, signed in to Weft as themselves, so Claude's edits are theirs.
+ */
+function ElsewhereSetup({ setup, onWeftComputer, onKeyMade }: { setup: Setup; onWeftComputer: boolean; onKeyMade: () => void }) {
   const [token, setToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const create = async () => {
     setBusy(true)
     try {
-      const { token: fresh } = await api<{ token: string }>('/api/tokens', {
-        method: 'POST',
-        body: { name: app === 'desktop' ? 'Claude Desktop' : 'Claude Code' },
-      })
+      const { token: fresh } = await api<{ token: string }>('/api/tokens', { method: 'POST', body: { name: 'Claude on another computer' } })
       setToken(fresh)
       onKeyMade()
     } catch (error) {
@@ -279,57 +283,82 @@ function ElsewhereSetup({ setup, onKeyMade }: { setup: Setup; onKeyMade: () => v
     }
   }
 
-  const key = token ?? 'weft_…'
-  const desktop = JSON.stringify(
-    { mcpServers: { weft: { command: 'node', args: ['C:\\path\\to\\weft-mcp.mjs'], env: { WEFT_URL: setup.serverUrl, WEFT_TOKEN: key } } } },
-    null,
-    2,
-  )
-  const code = `claude mcp add weft --scope user --env WEFT_URL=${setup.serverUrl} --env WEFT_TOKEN=${key} -- node "C:\\path\\to\\weft-mcp.mjs"`
+  const download = () => {
+    const link = document.createElement('a')
+    link.href = '/api/connect/extension'
+    link.download = 'Weft.mcpb'
+    link.click()
+  }
+
+  const code = `claude mcp add --transport http --scope user weft ${setup.otherUrl}/mcp --header "Authorization: Bearer ${token ?? 'YOUR_KEY'}"`
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
+      {onWeftComputer && !setup.teamUrl && (
+        <p className="rounded-lg border border-warn/40 bg-warn-soft px-3 py-2.5 text-[12px] leading-relaxed text-fg-2">
+          Weft is only open on this computer right now, so other computers can't reach it. To let teammates in, close Weft and start it with{' '}
+          <b className="font-medium text-fg">Start Weft for the team.cmd</b> in the Weft folder.
+        </p>
+      )}
       <p className="text-fg-2">
-        Copy the connector, <code className="font-mono text-[12px]">apps/mcp/dist/weft-mcp.mjs</code>, to the other computer (it needs Node 20 or
-        newer), and make sure that computer can reach this Weft server at {setup.serverUrl}.
+        {onWeftComputer && setup.teamUrl ? (
+          <>
+            Teammates open Weft at <code className="font-mono text-[12px] text-fg">{setup.teamUrl}</code> and sign in as themselves.{' '}
+          </>
+        ) : null}
+        Each person connects their own Claude, from their own computer, so Claude's edits are theirs. These steps are the same for everyone.
       </p>
-      <Segmented<App>
-        label="Claude app"
-        options={[
-          { id: 'desktop', label: 'Claude Desktop' },
-          { id: 'code', label: 'Claude Code' },
-        ]}
-        value={app}
-        onChange={(v) => v && setApp(v)}
-      />
-      <section className="flex flex-col gap-2">
-        <h3 className="font-medium text-fg">1. Make a key for Claude</h3>
-        {token ? (
-          <p className="text-[12px] text-warn">This key is shown once, and it's already in the settings below. Anyone who has it can edit your projects as you.</p>
-        ) : (
-          <Button className="self-start" variant="primary" icon={<KeyRound size={14} />} busy={busy} onClick={() => void create()}>
-            Create a key
+
+      <ol className="flex flex-col gap-4">
+        <Step n={1} title="Download Weft for Claude">
+          <p className="text-fg-2">An extension for the Claude app (90 KB). Claude runs it itself, so there's nothing else to install.</p>
+          <Button className="self-start" icon={<Download size={14} />} disabled={!setup.connectorBuilt} onClick={download}>
+            Download Weft.mcpb
           </Button>
-        )}
-      </section>
-      <section className={cx('flex flex-col gap-2', !token && 'opacity-60')}>
-        {app === 'desktop' ? (
-          <>
-            <h3 className="font-medium text-fg">2. Add Weft to Claude Desktop</h3>
-            <p className="text-fg-2">
-              In Claude Desktop, open Settings, then Developer, then Edit Config. Add this (with the connector's real path), save, and restart
-              Claude Desktop.
-            </p>
-            <CopyBlock text={desktop} label="settings" />
-          </>
-        ) : (
-          <>
-            <h3 className="font-medium text-fg">2. Add Weft to Claude Code</h3>
-            <p className="text-fg-2">Run this once in a terminal, with the connector's real path:</p>
-            <CopyBlock text={code} label="command" />
-          </>
-        )}
+        </Step>
+        <Step n={2} title="Create a key">
+          {token ? (
+            <>
+              <CopyBlock text={token} label="key" />
+              <p className="text-[12px] text-warn">Shown once. Anyone who has it can edit projects as you, so paste it only into Claude.</p>
+            </>
+          ) : (
+            <Button className="self-start" variant="primary" icon={<KeyRound size={14} />} busy={busy} onClick={() => void create()}>
+              Create a key
+            </Button>
+          )}
+        </Step>
+        <Step n={3} title="Install it in Claude">
+          <p className="text-fg-2">
+            Double-click the downloaded <b className="font-medium text-fg">Weft.mcpb</b>, or in Claude open Settings, then Extensions, then Advanced
+            settings, and choose Install Extension. Choose Install, then paste your key. The address is filled in for you:{' '}
+            <code className="font-mono text-[12px] text-fg">{setup.otherUrl}</code>.
+          </p>
+        </Step>
+        <Step n={4} title="Try it">
+          <p className="text-fg-2">In a new chat, ask Claude “List my Weft projects”.</p>
+        </Step>
+      </ol>
+
+      <section className="flex flex-col gap-2 border-t border-line pt-4">
+        <p className="text-[12px] text-fg-3">
+          Claude Code instead: run this once in a terminal (with your key). Claude Code can then attach pictures from web addresses, but not files from
+          the computer.
+        </p>
+        <CopyBlock text={code} label="command" />
       </section>
     </div>
+  )
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-hover text-[12px] font-semibold text-fg-2">{n}</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 pt-0.5">
+        <h3 className="font-medium text-fg">{title}</h3>
+        {children}
+      </div>
+    </li>
   )
 }
