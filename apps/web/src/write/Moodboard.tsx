@@ -553,7 +553,7 @@ function AssetBody({ item, asset, selected }: { item: MoodItemSnapshot; asset: A
   }
   return (
     <div className={cx(frameClass(selected), 'bg-media')} title={asset.name}>
-      <MediaFill media={{ hash: asset.hash, kind: asset.kind, title: asset.name }} />
+      <MediaFill media={{ hash: asset.hash, kind: asset.kind, title: asset.name }} size={item.w > 360 ? 1280 : 640} />
     </div>
   )
 }

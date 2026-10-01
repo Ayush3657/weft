@@ -30,6 +30,8 @@ export default defineConfig({
     // Native file events on Windows sometimes miss quick successive writes,
     // leaving the browser on stale code; polling the small source tree is reliable.
     watch: process.platform === 'win32' ? { usePolling: true, interval: 250 } : undefined,
+    // Prepare the app's code when the dev server starts, not on the first visit to each part.
+    warmup: { clientFiles: ['./src/main.tsx', './src/write/Write.tsx', './src/write/Moodboard.tsx', './src/play/Play.tsx'] },
     proxy: {
       '/api': { target: server },
       '/sync': { target: server.replace(/^http/, 'ws'), ws: true },

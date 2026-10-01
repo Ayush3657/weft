@@ -190,7 +190,7 @@ export const FrameNode = memo(function FrameNode({ id, data, selected }: NodePro
           <>
             {refs.slice(0, 6).map((ref) => (
               <div key={ref.id} className="size-6 shrink-0 overflow-hidden rounded border border-line bg-media" title={ref.title}>
-                <MediaFill media={ref} />
+                <MediaFill media={ref} size={320} />
               </div>
             ))}
             {refs.length > 6 && <span className="text-[11px] text-fg-3">+{refs.length - 6}</span>}

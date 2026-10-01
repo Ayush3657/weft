@@ -152,7 +152,7 @@ const ShotRow = memo(function ShotRow({
       )}
     >
       <div className="mt-0.5 h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border border-line bg-media">
-        {hero?.hash && hero.kind === 'image' && <img src={displayUrl(hero.hash)} alt="" className="size-full object-cover" draggable={false} />}
+        {hero?.hash && hero.kind === 'image' && <img src={displayUrl(hero.hash, 320)} alt="" className="size-full object-cover" draggable={false} />}
         {hero?.hash && hero.kind === 'video' && <video src={displayUrl(hero.hash)} muted preload="metadata" className="size-full object-cover" />}
         {!hero?.hash && (
           <div className="flex size-full items-center justify-center text-fg-3">

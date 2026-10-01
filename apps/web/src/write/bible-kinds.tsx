@@ -32,7 +32,7 @@ export function EntryAvatar({ entry, s, size = 20 }: { entry: BibleEntrySnapshot
       style={{ width: size, height: size }}
     >
       {picture ? (
-        <MediaFill media={{ hash: picture.hash, kind: picture.kind }} />
+        <MediaFill media={{ hash: picture.hash, kind: picture.kind }} size={320} />
       ) : (
         <BibleIcon kind={entry.kind} size={Math.round(size * 0.6)} />
       )}

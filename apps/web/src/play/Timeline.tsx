@@ -439,7 +439,7 @@ function PictureClip({
       title={`${label} · ${formatDuration(item.duration)}${frame?.description ? ` · ${frame.description}` : ''}`}
     >
       {hero?.hash && hero.kind === 'image' && (
-        <img src={displayUrl(hero.hash)} alt="" draggable={false} className="h-full w-[88px] shrink-0 object-cover" />
+        <img src={displayUrl(hero.hash, 320)} alt="" draggable={false} className="h-full w-[88px] shrink-0 object-cover" />
       )}
       {hero?.hash && hero.kind === 'video' && (
         <video src={displayUrl(hero.hash)} muted preload="metadata" className="h-full w-[88px] shrink-0 object-cover" />

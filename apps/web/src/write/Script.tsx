@@ -293,7 +293,7 @@ function Row({
           className="ml-3 block w-[64px] overflow-hidden rounded border border-line bg-media hover:border-line-strong"
           style={{ aspectRatio: s.meta.aspect.replace(':', ' / ') }}
         >
-          {heroAsset ? <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind }} /> : null}
+          {heroAsset ? <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind }} size={320} /> : null}
         </button>
         {siblings.length > 1 && (
           <div className="ml-3 flex flex-wrap gap-0.5" role="radiogroup" aria-label="Variation used in this cut">

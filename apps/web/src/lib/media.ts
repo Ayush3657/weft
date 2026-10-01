@@ -6,6 +6,11 @@ import { toast } from './toast'
 
 export const mediaUrl = (hash: string) => `/api/media/${hash}`
 
+/** Preview widths the server makes: thumbnails, cards, panels, the player. */
+export type PreviewSize = 320 | 640 | 1280 | 1920
+/** A small copy of a picture (the server falls back to the original for anything it can't resize). */
+export const previewUrl = (hash: string, size: PreviewSize) => `/api/media/${hash}/preview/${size}`
+
 export function fileKind(mime: string): Exclude<AssetKind, 'link'> | null {
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
@@ -50,9 +55,16 @@ function keepLocal(hash: string, file: File): void {
   }
 }
 
-/** Where to load a file for display: from memory if it was added here, otherwise from the server. */
-export function displayUrl(hash: string): string {
-  return local.get(hash)?.url ?? mediaUrl(hash)
+/**
+ * Where to show a file from. Pictures given a `size` come from the server's
+ * preview of about that size, or from memory while they're still uploading
+ * from here. Everything else (video, sound, full size) comes from memory if it
+ * was added here, otherwise the original on the server.
+ */
+export function displayUrl(hash: string, size?: PreviewSize): string {
+  const kept = local.get(hash)
+  if (size) return kept && uploads.has(hash) ? kept.url : previewUrl(hash, size)
+  return kept?.url ?? mediaUrl(hash)
 }
 
 // ------------------------------------------------------------------ uploads

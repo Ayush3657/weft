@@ -21,8 +21,11 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+/** The last list loaded, shown at once when you come back while it refreshes. */
+let lastProjects: ProjectSummary[] | null = null
+
 export function ProjectsPage() {
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
+  const [projects, setProjects] = useState<ProjectSummary[] | null>(lastProjects)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null)
@@ -30,6 +33,7 @@ export function ProjectsPage() {
   const load = useCallback(() => {
     api<{ projects: ProjectSummary[] }>('/api/projects')
       .then((r) => {
+        lastProjects = r.projects
         setProjects(r.projects)
         setError(null)
       })

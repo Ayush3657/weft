@@ -68,7 +68,7 @@ function MediaView({ node }: ReactNodeViewProps) {
   const s = useSnapshot()
   const { assetId, kind, src, alt } = node.attrs as { assetId: string | null; kind: AssetKind; src: string | null; alt: string }
   const asset = assetId ? s.assets[assetId] : undefined
-  const url = asset?.hash ? displayUrl(asset.hash) : src
+  const url = asset?.hash ? displayUrl(asset.hash, kind === 'image' ? 1280 : undefined) : src
   return (
     <NodeViewWrapper className="weft-media">
       <figure contentEditable={false} data-drag-handle>

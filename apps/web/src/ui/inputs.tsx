@@ -115,7 +115,7 @@ export function Thumb({
           active ? 'border-accent ring-2 ring-accent-soft' : 'border-line hover:border-line-strong',
         )}
       >
-        <MediaFill media={media} />
+        <MediaFill media={media} size={320} />
       </button>
       {onRemove && (
         <button

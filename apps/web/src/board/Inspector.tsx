@@ -181,7 +181,7 @@ function FrameInspector({
             {...dropZone('media')}
           >
             {heroAsset ? (
-              <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind, title: heroAsset.name }} controls />
+              <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind, title: heroAsset.name }} controls size={1280} />
             ) : (
               <button type="button" onClick={mediaPicker.open} className="size-full" aria-label="Add an image or video">
                 <EmptyMedia />

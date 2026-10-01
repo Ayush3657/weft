@@ -69,7 +69,7 @@ export function SendTo({ assetId, cutId, onClose }: { assetId: string | null; cu
                 >
                   <span className="w-8 shrink-0 text-[11px] font-semibold text-accent-strong tabular-nums">{labels.get(f.id) ?? '—'}</span>
                   <span className="h-7 w-11 shrink-0 overflow-hidden rounded border border-line bg-media">
-                    {asset && <MediaFill media={{ hash: asset.hash, kind: asset.kind }} />}
+                    {asset && <MediaFill media={{ hash: asset.hash, kind: asset.kind }} size={320} />}
                   </span>
                   <span className="truncate text-fg-2">{f.description || 'No description'}</span>
                 </button>

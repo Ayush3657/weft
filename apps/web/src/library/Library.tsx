@@ -78,7 +78,7 @@ function AssetThumb({ asset }: { asset: AssetSnapshot }) {
       </div>
     )
   }
-  return <MediaFill media={{ hash: asset.hash, kind: asset.kind, title: asset.name }} />
+  return <MediaFill media={{ hash: asset.hash, kind: asset.kind, title: asset.name }} size={320} />
 }
 
 /** Every image, video, audio file and link in the project. Drag them anywhere. */

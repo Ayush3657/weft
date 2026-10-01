@@ -3,8 +3,9 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { Hono, type Context } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { createMiddleware } from 'hono/factory'
-import { existsSync } from 'node:fs'
+import { createReadStream, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { z } from 'zod'
 import {
   SESSION_COOKIE,
@@ -24,6 +25,7 @@ import { createAgentServer } from './agent/tools'
 import { config, isOriginAllowed } from './config'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
+import { PREVIEW_SIZES, mediaPreview, type PreviewSize } from './previews'
 import { createProject, docName, getProject, listProjects, softDeleteProject } from './projects'
 import { hocuspocus } from './sync'
 import { UnfurlError, unfurl } from './unfurl'
@@ -150,6 +152,32 @@ app.put('/api/media/:hash', requireUser, async (c) => {
   if (!stream) return c.json({ error: 'The upload was empty' }, 400)
   const row = await storeMedia(stream, hash, mime, currentUser(c).id)
   return c.json({ hash: row.hash, size: row.size, mime: row.mime })
+})
+
+/**
+ * A small copy of a picture for showing it at a size: cards and thumbnails
+ * load a few kilobytes instead of the full file. Anything that can't be
+ * resized (video, animated GIFs) gets the original instead.
+ */
+app.get('/api/media/:hash/preview/:size', requireUser, async (c) => {
+  const hash = c.req.param('hash')
+  const size = Number(c.req.param('size'))
+  if (!(PREVIEW_SIZES as readonly number[]).includes(size)) return c.json({ error: 'Unknown preview size' }, 400)
+  const row = getMedia(hash)
+  if (!row) return c.json({ error: 'File not found' }, 404)
+  const file = await mediaPreview(hash, size as PreviewSize)
+  if (!file) return c.redirect(`/api/media/${hash}`, 302)
+  const etag = `"${hash}-${size}"`
+  if (c.req.header('if-none-match') === etag) return c.body(null, 304)
+  return new Response(Readable.toWeb(createReadStream(file)) as ReadableStream<Uint8Array>, {
+    headers: {
+      'Content-Type': 'image/webp',
+      'Content-Length': String(statSync(file).size),
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      ETag: etag,
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
 })
 
 app.get('/api/media/:hash', requireUser, (c) => {

@@ -128,7 +128,7 @@ const StageLayer = memo(function StageLayer({
       style={{ opacity: layer.opacity, clipPath: layer.reveal < 1 ? `inset(0 ${(1 - layer.reveal) * 100}% 0 0)` : undefined }}
     >
       {hero?.hash && hero.kind === 'image' && (
-        <img src={displayUrl(hero.hash)} alt="" draggable={false} className="size-full object-cover" style={{ transform }} />
+        <img src={displayUrl(hero.hash, 1920)} alt="" draggable={false} className="size-full object-cover" style={{ transform }} />
       )}
       {hero?.hash && hero.kind === 'video' && <StageVideo hash={hero.hash} item={item} clock={clock} />}
       {!hero?.hash && <Slate label={label} frame={frame} />}

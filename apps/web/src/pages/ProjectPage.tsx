@@ -13,10 +13,27 @@ import { ProjectProvider } from '../project/ProjectProvider'
 import { AppHeader, LogoMark } from '../shell/Shell'
 import { Button, Field, FullScreenMessage, IconButton, Input, Kbd, Menu, Modal, Spinner } from '../ui'
 
-// Write (with the notes editor) and Play load when first opened.
-const Write = lazy(() => import('../write/Write').then((m) => ({ default: m.Write })))
-const Moodboard = lazy(() => import('../write/Moodboard').then((m) => ({ default: m.Moodboard })))
-const Play = lazy(() => import('../play/Play').then((m) => ({ default: m.Play })))
+// Write (with the notes editor) and Play are separate downloads, fetched in the background once a project is open.
+const loadWrite = () => import('../write/Write')
+const loadMoodboard = () => import('../write/Moodboard')
+const loadPlay = () => import('../play/Play')
+const Write = lazy(() => loadWrite().then((m) => ({ default: m.Write })))
+const Moodboard = lazy(() => loadMoodboard().then((m) => ({ default: m.Moodboard })))
+const Play = lazy(() => loadPlay().then((m) => ({ default: m.Play })))
+
+/** Fetches the other workspaces while the browser is idle, so switching to them is instant. */
+function usePreloadWorkspaces() {
+  useEffect(() => {
+    const preload = () => void Promise.all([loadWrite(), loadPlay(), loadMoodboard()]).catch(() => undefined)
+    // Safari has no idle callback; a short delay does the same job there.
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(preload, { timeout: 2500 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = globalThis.setTimeout(preload, 1200)
+    return () => globalThis.clearTimeout(id)
+  }, [])
+}
 
 const loadingWorkspace = (
   <div className="flex h-full items-center justify-center">
@@ -109,6 +126,7 @@ function ProjectShell({ projectId, workspace, write }: { projectId: string; work
   const [libraryPref, setLibraryPref] = usePref('library')
   const libraryOpen = libraryPref === '1'
   useUndoShortcuts()
+  usePreloadWorkspaces()
 
   // L opens and closes the Library, anywhere but in a text field.
   useEffect(() => {

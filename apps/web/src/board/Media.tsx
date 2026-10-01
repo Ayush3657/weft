@@ -2,7 +2,7 @@ import type { AssetKind } from '@weft/model'
 import { AudioLines, Film, ImagePlus, Link2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { cx } from '../lib/cx'
-import { displayUrl } from '../lib/media'
+import { displayUrl, useUploading, type PreviewSize } from '../lib/media'
 
 export interface MediaRef {
   hash: string | null
@@ -14,13 +14,15 @@ export interface MediaRef {
  * The address to show a file from. A file someone else just added can still
  * be on its way to the server, so a failed load is retried for a little while.
  */
-export function useMediaSrc(hash: string | null): { src: string | null; onError: () => void } {
+export function useMediaSrc(hash: string | null, size?: PreviewSize): { src: string | null; onError: () => void } {
   const [attempt, setAttempt] = useState({ hash, count: 0 })
   const timer = useRef(0)
+  // Re-render when an upload finishes, to move from the copy in memory to the server's preview.
+  useUploading()
   useEffect(() => () => window.clearTimeout(timer.current), [])
   const count = attempt.hash === hash ? attempt.count : 0
   if (!hash) return { src: null, onError: () => undefined }
-  const base = displayUrl(hash)
+  const base = displayUrl(hash, size)
   return {
     src: count && !base.startsWith('blob:') ? `${base}?try=${count}` : base,
     onError: () => {
@@ -32,9 +34,23 @@ export function useMediaSrc(hash: string | null): { src: string | null; onError:
   }
 }
 
-/** An image or video filling its box. Videos play on hover. */
-export function MediaFill({ media, className, controls = false }: { media: MediaRef; className?: string; controls?: boolean }) {
-  const { src, onError } = useMediaSrc(media.kind === 'image' || media.kind === 'video' ? media.hash : null)
+/**
+ * An image or video filling its box. Videos play on hover. Pictures load the
+ * server's preview at `size` (about twice the box's width suits sharp screens).
+ */
+export function MediaFill({
+  media,
+  className,
+  controls = false,
+  size = 640,
+}: {
+  media: MediaRef
+  className?: string
+  controls?: boolean
+  size?: PreviewSize
+}) {
+  const picture = media.kind === 'image'
+  const { src, onError } = useMediaSrc(picture || media.kind === 'video' ? media.hash : null, picture ? size : undefined)
   if (!src) return <MediaIcon kind={media.kind} className={className} />
   if (media.kind === 'video') {
     return (
