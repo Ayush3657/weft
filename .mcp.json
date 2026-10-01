@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "weft": {
+      "command": "node",
+      "args": ["apps/mcp/dist/weft-mcp.mjs"]
+    }
+  }
+}

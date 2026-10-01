@@ -1,3 +1,4 @@
+import { getConnInfo } from '@hono/node-server/conninfo'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { Hono, type Context } from 'hono'
@@ -9,6 +10,7 @@ import { Readable } from 'node:stream'
 import { z } from 'zod'
 import {
   SESSION_COOKIE,
+  accessTokenOwner,
   createAccessToken,
   createSession,
   deleteAccessToken,
@@ -22,6 +24,17 @@ import {
 } from './auth'
 import { liveChangeSets, sessionWithChangeSet } from './agent/session'
 import { createAgentServer } from './agent/tools'
+import {
+  LOCAL_KEY_NAME,
+  addToClaudeDesktop,
+  claudeDesktopConfigs,
+  claudeDesktopHasWeft,
+  isLoopback,
+  readConnectorFile,
+  removeConnectorFile,
+  removeFromClaudeDesktop,
+  writeConnectorFile,
+} from './connect'
 import { config, isOriginAllowed } from './config'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
@@ -222,11 +235,13 @@ app.all('/mcp', async (c) => {
   const origin = c.req.header('origin')
   if (origin && !isOriginAllowed(origin)) return c.json({ error: 'Origin not allowed' }, 403)
   const auth = c.req.header('authorization')
-  const user = auth?.startsWith('Bearer ') ? userFromAccessToken(auth.slice(7).trim()) : null
-  if (!user) {
-    const message = 'Connect with a Weft access token (Authorization: Bearer weft_…). Make one in Weft from your account menu: Connect Claude.'
-    return c.json({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }, 401)
-  }
+  const key = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null
+  const user = key ? userFromAccessToken(key) : null
+  // Without a working key Claude can still list the tools; using one explains how to connect.
+  const reason =
+    key && !user
+      ? "Weft doesn't recognise Claude's key (it may have been revoked). In Weft, open your account menu, choose Connect Claude, then Connect Claude on this computer."
+      : undefined
   if (c.req.method !== 'POST') {
     return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null }, 405, { Allow: 'POST' })
   }
@@ -234,9 +249,9 @@ app.all('/mcp', async (c) => {
     .clone()
     .json()
     .catch(() => null)) as { method?: string; params?: { name?: string } } | null
-  if (call?.method === 'tools/call') log.info(`${user.email} → ${call.params?.name ?? '?'} (Claude)`)
+  if (call?.method === 'tools/call') log.info(`${user?.email ?? 'not connected'} → ${call.params?.name ?? '?'} (Claude)`)
   // Stateless: a fresh server per request, so any number of Claude windows can connect.
-  const server = createAgentServer(user)
+  const server = createAgentServer(user, reason)
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
   await server.connect(transport)
   try {
@@ -246,16 +261,56 @@ app.all('/mcp', async (c) => {
   }
 })
 
-/** What the "Connect Claude" dialog needs to write Claude's settings. */
-app.get('/api/connect', requireUser, (c) =>
-  c.json({
+/**
+ * Connecting Claude on this computer writes files here (a key file, Claude
+ * Desktop's settings), so it's only offered to someone at this computer.
+ */
+const fromThisComputer = (c: Context<Env>) => isLoopback(getConnInfo(c).remote.address)
+
+/** What the "Connect Claude" dialog needs: whether one-click connecting is possible, and settings for doing it by hand. */
+app.get('/api/connect', requireUser, (c) => {
+  const local = fromThisComputer(c)
+  const saved = local ? readConnectorFile() : null
+  return c.json({
     serverUrl: config.agentUrl,
     connectorPath: config.connectorPath,
     connectorBuilt: existsSync(config.connectorPath),
     // The Node that runs this server, so Claude Desktop doesn't depend on its PATH.
     nodePath: process.execPath,
-  }),
-)
+    here: local
+      ? {
+          available: true,
+          connected: !!saved && accessTokenOwner(saved.token) === currentUser(c).id,
+          desktopFound: claudeDesktopConfigs().length > 0,
+          desktopHasWeft: claudeDesktopHasWeft(),
+        }
+      : { available: false },
+  })
+})
+
+/** One click: a fresh key for Claude saved where the connector finds it, and Weft added to Claude Desktop. */
+app.post('/api/connect/local', requireUser, (c) => {
+  if (!fromThisComputer(c)) return c.json({ error: 'Connect Claude from the computer Weft runs on, or set it up by hand.' }, 403)
+  const user = currentUser(c)
+  for (const t of listAccessTokens(user.id)) if (t.name === LOCAL_KEY_NAME) deleteAccessToken(user.id, t.id)
+  const { token } = createAccessToken(user.id, LOCAL_KEY_NAME)
+  const keyFile = writeConnectorFile(config.agentUrl, token)
+  const desktop = addToClaudeDesktop(process.execPath, config.connectorPath)
+  log.info(`${user.email} connected Claude on this computer`)
+  return c.json({ keyFile, desktopFound: claudeDesktopConfigs().length > 0, desktop })
+})
+
+/** Disconnects Claude on this computer: the key stops working and Weft leaves Claude Desktop's settings. */
+app.delete('/api/connect/local', requireUser, (c) => {
+  if (!fromThisComputer(c)) return c.json({ error: 'Disconnect from the computer Weft runs on.' }, 403)
+  const user = currentUser(c)
+  for (const t of listAccessTokens(user.id)) if (t.name === LOCAL_KEY_NAME) deleteAccessToken(user.id, t.id)
+  const saved = readConnectorFile()
+  if (saved && (accessTokenOwner(saved.token) === null || accessTokenOwner(saved.token) === user.id)) removeConnectorFile()
+  const desktop = removeFromClaudeDesktop()
+  log.info(`${user.email} disconnected Claude on this computer`)
+  return c.json({ desktop })
+})
 
 /**
  * Which of Claude's change sets can still be undone. Undo lives in the

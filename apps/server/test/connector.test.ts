@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -82,6 +82,27 @@ describe('the Weft connector', () => {
     expect(textOf(attached)).toContain('Attached shot_010.png (image)')
     const cut = textOf(await call('get_cut', { project: projectId }))
     expect(cut).toContain('Picture: image')
+  })
+
+  it('works before Weft is connected, and picks up the key without restarting', async () => {
+    const keyFile = path.join(dataDir, 'home', '.weft', 'connector.json')
+    const later = new Client({ name: 'claude-desktop-test', version: '1.0.0' })
+    await later.connect(
+      new StdioClientTransport({ command: process.execPath, args: [connector], env: { WEFT_URL: base, WEFT_CONNECTOR_FILE: keyFile }, stderr: 'pipe' }),
+    )
+    // Claude Desktop starts the connector at launch; Weft's tools show up even with no key yet.
+    expect((await later.listTools()).tools.length).toBeGreaterThan(20)
+    const before = (await later.callTool({ name: 'list_projects', arguments: {} })) as ToolResult
+    expect(before.isError).toBe(true)
+    expect(textOf(before)).toContain('Connect Claude on this computer')
+
+    // Then someone clicks Connect Claude on this computer in Weft.
+    mkdirSync(path.dirname(keyFile), { recursive: true })
+    writeFileSync(keyFile, JSON.stringify({ url: base, token }))
+    const after = (await later.callTool({ name: 'list_projects', arguments: {} })) as ToolResult
+    expect(after.isError).toBeFalsy()
+    expect(textOf(after)).toContain('Render test')
+    await later.close()
   })
 
   it('says clearly when the file is missing', async () => {

@@ -4,7 +4,10 @@
  * uploads files from this computer when Claude attaches one by its path
  * (a Blender render, say), since the server can't read your disk.
  *
- * Settings come from the environment:
+ * It finds the server and its key in ~/.weft/connector.json, which Weft
+ * writes when you choose Connect Claude on this computer. The file is read
+ * on every request, so connecting (or reconnecting) needs no restart.
+ * For another computer, set these instead:
  *   WEFT_URL    the Weft server, e.g. http://127.0.0.1:8787
  *   WEFT_TOKEN  an access token from Weft (your menu: Connect Claude)
  */
@@ -16,15 +19,38 @@ import { readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-const serverUrl = (process.env.WEFT_URL || 'http://127.0.0.1:8787').replace(/\/+$/, '')
-const token = (process.env.WEFT_TOKEN ?? '').trim()
-
 // stdout carries the protocol, so anything for people goes to stderr (Claude Desktop keeps it in its logs).
 const log = (...parts: unknown[]) => console.error('[weft]', ...parts)
 
-if (!token.startsWith('weft_')) {
-  log('Set WEFT_TOKEN to a Weft access token. Make one in Weft from your account menu: Connect Claude.')
-  process.exit(1)
+const KEY_FILE = process.env.WEFT_CONNECTOR_FILE || path.join(os.homedir(), '.weft', 'connector.json')
+const trimUrl = (url: string) => url.replace(/\/+$/, '')
+
+/** The server and key: from the environment if set, otherwise from the file Weft saved. */
+async function settings(): Promise<{ url: string; token: string | null }> {
+  const envUrl = process.env.WEFT_URL ? trimUrl(process.env.WEFT_URL) : null
+  const envToken = process.env.WEFT_TOKEN?.trim()
+  if (envToken) return { url: envUrl ?? 'http://127.0.0.1:8787', token: envToken }
+  try {
+    const saved = JSON.parse(await readFile(KEY_FILE, 'utf8')) as { url?: unknown; token?: unknown }
+    return {
+      url: envUrl ?? (typeof saved.url === 'string' && saved.url ? trimUrl(saved.url) : 'http://127.0.0.1:8787'),
+      token: typeof saved.token === 'string' && saved.token ? saved.token : null,
+    }
+  } catch {
+    return { url: envUrl ?? 'http://127.0.0.1:8787', token: null }
+  }
+}
+
+const start = await settings()
+const serverUrl = start.url
+if (!start.token) log(`No key yet. In Weft, open your account menu and choose Connect Claude. (Looked in ${KEY_FILE}.)`)
+
+/** Requests to the server carry the current key, so a new one works without restarting Claude. */
+async function withKey(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const { token } = await settings()
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  return fetch(input, { ...init, headers })
 }
 
 const MEDIA_TYPES: Record<string, string> = {
@@ -60,11 +86,7 @@ async function uploadLocalFile(args: Record<string, unknown>): Promise<Record<st
   if (!info?.isFile()) throw new Error(`There's no file at ${full}.`)
   const data = await readFile(full)
   const hash = createHash('sha256').update(data).digest('hex')
-  const res = await fetch(`${serverUrl}/api/media/${hash}`, {
-    method: 'PUT',
-    headers: { authorization: `Bearer ${token}`, 'content-type': type },
-    body: data,
-  })
+  const res = await withKey(`${serverUrl}/api/media/${hash}`, { method: 'PUT', headers: { 'content-type': type }, body: data })
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(body.error ?? `Uploading ${path.basename(full)} failed (${res.status}).`)
@@ -80,9 +102,7 @@ const describe = (error: unknown) => {
     : message
 }
 
-const remote = new StreamableHTTPClientTransport(new URL(`${serverUrl}/mcp`), {
-  requestInit: { headers: { Authorization: `Bearer ${token}` } },
-})
+const remote = new StreamableHTTPClientTransport(new URL(`${serverUrl}/mcp`), { fetch: withKey })
 const local = new StdioServerTransport()
 
 async function forward(message: JSONRPCMessage): Promise<void> {
