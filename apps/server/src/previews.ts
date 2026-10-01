@@ -53,3 +53,26 @@ export function mediaPreview(hash: string, size: PreviewSize): Promise<string | 
   }
   return job
 }
+
+let warming: Promise<void> = Promise.resolve()
+let stopping = false
+
+/**
+ * Makes a new picture's previews in the background, one picture at a time,
+ * so they're ready the first time anyone looks (the player's first play
+ * included). Previews asked for meanwhile are made straight away as usual.
+ */
+export function warmPreviews(hash: string): void {
+  warming = warming.then(async () => {
+    for (const size of [640, 320, 1920, 1280] as const) {
+      if (stopping || !existsSync(previewDir)) return
+      await mediaPreview(hash, size)
+    }
+  })
+}
+
+/** Lets the preview being made finish and skips the rest, for shutting down. */
+export async function stopWarming(): Promise<void> {
+  stopping = true
+  await warming
+}

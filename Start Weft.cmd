@@ -17,7 +17,8 @@ if not exist node_modules (
 )
 
 echo Starting Weft. Keep this window open while you use it; close it to stop Weft.
-start "" /b cmd /c "timeout /t 10 >/dev/null && start http://localhost:5173"
+rem Opens Weft in the browser as soon as it answers (the first run can take a while).
+start "" /b powershell -NoProfile -Command "for ($i = 0; $i -lt 120; $i++) { Start-Sleep 1; try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://localhost:5173/; Start-Process http://localhost:5173; break } catch {} }"
 call npm run dev
 
 :failed

@@ -38,7 +38,7 @@ import {
 import { config, isOriginAllowed } from './config'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
-import { PREVIEW_SIZES, mediaPreview, type PreviewSize } from './previews'
+import { PREVIEW_SIZES, mediaPreview, warmPreviews, type PreviewSize } from './previews'
 import { ImportError, createProject, docName, getProject, importProject, listProjects, softDeleteProject } from './projects'
 import { hocuspocus } from './sync'
 import { UnfurlError, unfurl } from './unfurl'
@@ -176,6 +176,7 @@ app.put('/api/media/:hash', requireUser, async (c) => {
   const stream = c.req.raw.body
   if (!stream) return c.json({ error: 'The upload was empty' }, 400)
   const row = await storeMedia(stream, hash, mime, currentUser(c).id)
+  warmPreviews(row.hash)
   return c.json({ hash: row.hash, size: row.size, mime: row.mime })
 })
 
