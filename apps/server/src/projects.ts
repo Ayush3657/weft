@@ -1,4 +1,4 @@
-import { initProject, newId, type AspectRatio, type ProjectType } from '@weft/model'
+import { PROJECT_TYPES, initProject, newId, readMeta, type AspectRatio, type ProjectType } from '@weft/model'
 import * as Y from 'yjs'
 import { db, type ProjectRow } from './db'
 
@@ -77,6 +77,56 @@ export function createProject(userId: string, input: CreateProjectInput): Projec
     )
     .get(id) as ProjectRow & { creator_name: string | null }
   return toSummary(row)
+}
+
+function summaryOf(id: string): ProjectSummary {
+  const row = db
+    .prepare(
+      'SELECT projects.*, users.name AS creator_name FROM projects LEFT JOIN users ON users.id = projects.created_by WHERE projects.id = ?',
+    )
+    .get(id) as ProjectRow & { creator_name: string | null }
+  return toSummary(row)
+}
+
+export class ImportError extends Error {}
+
+/**
+ * Adds a project from its saved sync state (a project folder opened in Weft).
+ * It keeps its id when that's free, so the same project stays the same project
+ * wherever it's opened. If this server already has it, nothing changes and the
+ * app merges the folder's copy in instead.
+ */
+export function importProject(userId: string, state: Uint8Array, wantedId: string | null): { project: ProjectSummary; existed: boolean } {
+  const validId = wantedId && /^[A-Za-z0-9]{6,32}$/.test(wantedId) ? wantedId : null
+  const existing = validId ? getProject(validId) : null
+  if (existing && !existing.deleted_at) return { project: summaryOf(existing.id), existed: true }
+
+  const doc = new Y.Doc()
+  try {
+    Y.applyUpdate(doc, state)
+  } catch {
+    throw new ImportError("That file isn't a Weft project")
+  }
+  const meta = readMeta(doc.getMap('meta'))
+  const isProject = !!meta.mainCutId && doc.getMap('cuts').has(meta.mainCutId)
+  doc.destroy()
+  if (!isProject) throw new ImportError("That file isn't a Weft project")
+
+  const id = validId && !existing ? validId : newId()
+  const type: ProjectType = (PROJECT_TYPES as readonly string[]).includes(meta.type) ? meta.type : 'other'
+  const now = Date.now()
+  db.transaction(() => {
+    db.prepare('INSERT INTO projects (id, title, type, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      id,
+      meta.title || 'Untitled',
+      type,
+      userId,
+      now,
+      now,
+    )
+    db.prepare('INSERT INTO project_docs (project_id, state, updated_at) VALUES (?, ?, ?)').run(id, Buffer.from(state), now)
+  })()
+  return { project: summaryOf(id), existed: false }
 }
 
 export function softDeleteProject(id: string): boolean {

@@ -15,6 +15,24 @@ Open http://localhost:5173. The API and sync server runs on port 8787, and the w
 
 Sign-in is dev mode for now (name and email, no password). Google and Microsoft sign-in come before team testing.
 
+For everyday use, run the built app instead. It loads much faster than the dev server:
+
+```bash
+npm run app
+```
+
+Then open http://localhost:8787. In Chrome or Edge you can install it as an app (the install icon in the address bar), which gives Weft its own window and taskbar icon.
+
+## Keep projects in a folder
+
+In Chrome or Edge, Weft can keep a copy of your projects in folders on your computer:
+
+- **A vault folder** (on the projects page): every project you open gets a folder of its own there.
+- **A folder for one project**: use the folder button in the project's header.
+- **Open from folder** (projects page): opens a project folder from anywhere, for example one copied from another computer. It keeps its id, so it's the same project, and its pictures upload if the server doesn't have them.
+
+Each project folder holds `project.sync` (what Weft opens), `project.json` (a readable copy), `script.md`, `notes/` and `media/` (the original pictures, clips and sound). Weft keeps it up to date while the project is open and merges in changes made elsewhere when you reopen it, so the folder can live in OneDrive or Dropbox. The browser asks once per visit before Weft can write to the folder again; installed as an app, it can remember.
+
 ## Use it with Claude
 
 Claude can read and edit your projects through MCP: board a script, rewrite VO to fit a length, make a cutdown, write image prompts, or attach a Blender render to a frame. Its edits show up live for everyone, grouped into change sets that you keep or undo from the bar in the app.

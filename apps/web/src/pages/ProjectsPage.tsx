@@ -6,6 +6,7 @@ import { navigate, projectPath } from '../lib/router'
 import { toastError } from '../lib/toast'
 import { AppHeader } from '../shell/Shell'
 import { Button, Field, IconButton, Input, Menu, Modal, Segmented, Spinner } from '../ui'
+import { OpenFolderButton, VaultPanel } from '../vault/VaultPanel'
 
 const TYPE_LABELS: Record<ProjectType, string> = { ad: 'Ad', film: 'Short film', other: 'Other' }
 const TYPE_ICONS = { ad: Sparkles, film: Film, other: Clapperboard }
@@ -52,10 +53,15 @@ export function ProjectsPage() {
               <h1 className="text-[22px] font-semibold tracking-tight text-fg">Projects</h1>
               <p className="mt-1 text-fg-2">Everyone on this server can open these.</p>
             </div>
-            <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreating(true)}>
-              New project
-            </Button>
+            <div className="flex items-center gap-2">
+              <OpenFolderButton />
+              <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreating(true)}>
+                New project
+              </Button>
+            </div>
           </div>
+
+          <VaultPanel projects={projects} />
 
           {error && (
             <div className="mt-8 flex items-center gap-3 rounded-lg border border-line bg-panel p-4 text-fg-2">

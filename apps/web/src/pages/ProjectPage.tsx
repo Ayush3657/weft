@@ -10,6 +10,7 @@ import { navigate, projectPath, type Workspace, type WriteLocation } from '../li
 import { useProject, useSnapshot, useSyncStatus, useUndoShortcuts } from '../project/hooks'
 import { ChangeBar } from '../project/ChangeBar'
 import { ProjectProvider } from '../project/ProjectProvider'
+import { VaultButton } from '../vault/VaultButton'
 import { AppHeader, LogoMark } from '../shell/Shell'
 import { Button, Field, FullScreenMessage, IconButton, Input, Kbd, Menu, Modal, Spinner } from '../ui'
 
@@ -170,6 +171,7 @@ function ProjectShell({ projectId, workspace, write }: { projectId: string; work
         <div className="flex items-center gap-2">
           <CutPicker cutId={cutId} onChange={setSavedCut} />
           <LengthMeter cutId={cutId} />
+          <VaultButton />
           <IconButton
             label={libraryOpen ? 'Close the Library' : 'Open the Library'}
             tooltip={

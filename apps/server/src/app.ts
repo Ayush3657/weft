@@ -26,7 +26,7 @@ import { config, isOriginAllowed } from './config'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
 import { PREVIEW_SIZES, mediaPreview, type PreviewSize } from './previews'
-import { createProject, docName, getProject, listProjects, softDeleteProject } from './projects'
+import { ImportError, createProject, docName, getProject, importProject, listProjects, softDeleteProject } from './projects'
 import { hocuspocus } from './sync'
 import { UnfurlError, unfurl } from './unfurl'
 
@@ -37,6 +37,7 @@ export const app = new Hono<Env>()
 app.onError((err, c) => {
   if (err instanceof UploadError) return c.json({ error: err.message }, err.status)
   if (err instanceof UnfurlError) return c.json({ error: err.message }, err.status)
+  if (err instanceof ImportError) return c.json({ error: err.message }, 400)
   log.error(`${c.req.method} ${c.req.path} failed`, err)
   return c.json({ error: 'Something went wrong on the server' }, 500)
 })
@@ -127,6 +128,17 @@ app.post('/api/projects', requireUser, async (c) => {
   })
   log.info(`${currentUser(c).email} created project "${project.title}"`)
   return c.json({ project }, 201)
+})
+
+/** Opens a project folder's saved state on this server (the body is project.sync). */
+app.post('/api/projects/import', requireUser, async (c) => {
+  const declared = Number(c.req.header('content-length') ?? 0)
+  if (declared > 256 * 1024 * 1024) return c.json({ error: 'That project is too large to open' }, 413)
+  const state = new Uint8Array(await c.req.arrayBuffer())
+  if (!state.length) return c.json({ error: 'The project file was empty' }, 400)
+  const result = importProject(currentUser(c).id, state, c.req.query('id') ?? null)
+  if (!result.existed) log.info(`${currentUser(c).email} opened "${result.project.title}" from a folder`)
+  return c.json(result, result.existed ? 200 : 201)
 })
 
 app.delete('/api/projects/:id', requireUser, (c) => {
@@ -287,6 +299,15 @@ app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404))
 
 if (existsSync(config.webDist)) {
   const root = path.relative(process.cwd(), config.webDist) || '.'
-  app.use('/*', serveStatic({ root }))
+  app.use(
+    '/*',
+    serveStatic({
+      root,
+      // Built files have their contents' hash in their names, so browsers can keep them for good.
+      onFound: (file, c) => {
+        if (/[\\/]assets[\\/]/.test(file)) c.header('Cache-Control', 'public, max-age=31536000, immutable')
+      },
+    }),
+  )
   app.get('*', serveStatic({ path: path.join(root, 'index.html') }))
 }

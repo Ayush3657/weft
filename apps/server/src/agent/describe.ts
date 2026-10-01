@@ -176,27 +176,6 @@ export function describeCut(s: ProjectSnapshot, cutId: string): string {
   return out.join('\n')
 }
 
-const cell = (text: string) => quote(text).replace(/\|/g, '\\|') || ' '
-
-/** The AV script for a cut, as a Markdown table. */
-export function scriptTable(s: ProjectSnapshot, cutId: string): string {
-  const cut = s.cuts[cutId]!
-  const t = cutTimeline(s, cutId)
-  const labels = shotLabels(s)
-  const rows = t.items.map((item) => {
-    const f = s.frames[item.frameId]!
-    const audio = audioLines(f).join(' / ')
-    return `| ${labels.get(f.id) ?? ''} | ${cell(f.description)} | ${cell(audio)} | ${cell(f.onScreenText)} | ${item.hidden ? 'hidden' : formatDuration(item.duration)} |`
-  })
-  return [
-    `AV script · "${cut.name}" · ${clock(t.total)}${cut.targetDuration ? ` of ${clock(cut.targetDuration)}` : ''}`,
-    '',
-    '| Shot | Video | Audio | On screen | Length |',
-    '|---|---|---|---|---|',
-    ...rows,
-  ].join('\n')
-}
-
 /** Everything about a project at a glance: brief, bible, cuts, scenes, pages and counts. */
 export function describeProject(s: ProjectSnapshot, project: Project, id: string): string {
   const m = s.meta

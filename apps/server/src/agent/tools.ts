@@ -13,6 +13,7 @@ import {
   cutTimeline,
   formatSeconds,
   notesToMarkdown,
+  scriptMarkdown,
   shotLabels,
   type AudioLineInit,
   type CameraAngle,
@@ -30,7 +31,7 @@ import { config } from '../config'
 import { getMedia, mediaFile, storeMediaBuffer } from '../media'
 import { createProject, listProjects, type ProjectSummary } from '../projects'
 import { downloadPublic, unfurl } from '../unfurl'
-import { describeCut, describeFrame, describeMoodboard, describeProject, resolveCut, resolveEntry, resolveFrame, resolvePage, scriptTable, searchProject } from './describe'
+import { describeCut, describeFrame, describeMoodboard, describeProject, resolveCut, resolveEntry, resolveFrame, resolvePage, searchProject } from './describe'
 import { contactSheet, imageSize, previewJpeg } from './images'
 import { AgentError, sessionFor, type AgentSession } from './session'
 
@@ -315,7 +316,7 @@ export function createAgentServer(user: PublicUser): McpServer {
     },
     guarded(async ({ project, cut }) => {
       const { s } = await open(project)
-      return text(scriptTable(s, resolveCut(s, cut)))
+      return text(scriptMarkdown(s, resolveCut(s, cut)))
     }),
   )
 

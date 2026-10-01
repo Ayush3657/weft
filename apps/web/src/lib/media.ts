@@ -224,6 +224,13 @@ export async function importFile(project: Project, file: File, userId: string, k
   return assetId
 }
 
+/** Puts a file on the server (if it isn't there yet) without adding it to a project. Returns its hash. */
+export async function uploadMedia(file: File): Promise<string> {
+  const hash = await hashFile(file)
+  await upload(file, hash)
+  return hash
+}
+
 /** Imports several files, reporting failures as toasts. Returns the asset ids that worked. */
 export async function importFiles(project: Project, files: Iterable<File>, userId: string): Promise<string[]> {
   const ids: string[] = []
