@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -78,5 +78,13 @@ describe('picture previews', () => {
 
     expect((await fetch(`${base}/api/media/${smallHash}/preview/500`, { headers: { cookie } })).status).toBe(400)
     expect((await fetch(`${base}/api/media/${'0'.repeat(64)}/preview/320`, { headers: { cookie } })).status).toBe(404)
+  })
+
+  it('makes every preview size soon after an upload, before anyone asks', async () => {
+    const picture = await sharp({ create: { width: 2400, height: 1350, channels: 3, background: '#557733' } }).png().toBuffer()
+    const hash = await upload(picture, 'image/png')
+    const files = [320, 640, 1280, 1920].map((size) => path.join(dataDir, 'previews', hash.slice(0, 2), `${hash}-${size}.webp`))
+    for (let tries = 0; tries < 100 && !files.every((file) => existsSync(file)); tries++) await new Promise((r) => setTimeout(r, 50))
+    expect(files.filter((file) => !existsSync(file))).toEqual([])
   })
 })

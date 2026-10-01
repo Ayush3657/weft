@@ -29,6 +29,7 @@ import { z } from 'zod'
 import type { PublicUser } from '../auth'
 import { config } from '../config'
 import { getMedia, mediaFile, storeMediaBuffer } from '../media'
+import { warmPreviews } from '../previews'
 import { createProject, listProjects, type ProjectSummary } from '../projects'
 import { downloadPublic, unfurl } from '../unfurl'
 import { describeCut, describeFrame, describeMoodboard, describeProject, resolveCut, resolveEntry, resolveFrame, resolvePage, searchProject } from './describe'
@@ -885,6 +886,7 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
         const file = await downloadPublic(url, config.maxUploadBytes)
         if (!MEDIA_TYPES.test(file.contentType)) throw new AgentError(`That address isn't an image, video or audio file (it's ${file.contentType || 'unknown'})`)
         const row = await storeMediaBuffer(new Uint8Array(file.data), file.contentType, me().id)
+        warmPreviews(row.hash)
         ;({ hash: fileHash, mime, size } = row)
         fileName ||= decodeURIComponent(file.url.pathname.split('/').pop() || '') || file.url.hostname
       } else if (filePath) {

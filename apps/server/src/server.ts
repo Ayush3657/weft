@@ -5,6 +5,7 @@ import { WebSocketServer, type RawData } from 'ws'
 import { closeAllSessions } from './agent/session'
 import { app } from './app'
 import { log } from './log'
+import { stopWarming } from './previews'
 import { hocuspocus } from './sync'
 
 const toBytes = (data: RawData): Uint8Array =>
@@ -56,6 +57,7 @@ export function startServer(options: { port: number; host: string }): Promise<Ru
           for (const client of sockets.clients) client.terminate()
           sockets.close()
           await new Promise<void>((done) => server.close(() => done()))
+          await stopWarming()
         },
       })
     })
