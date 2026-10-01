@@ -29,13 +29,14 @@ import {
   addToClaudeDesktop,
   claudeDesktopConfigs,
   claudeDesktopHasWeft,
-  isLoopback,
+  isThisComputer,
   readConnectorFile,
   removeConnectorFile,
   removeFromClaudeDesktop,
   writeConnectorFile,
 } from './connect'
 import { config, isOriginAllowed } from './config'
+import { claudeExtension } from './extension'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
 import { PREVIEW_SIZES, mediaPreview, warmPreviews, type PreviewSize } from './previews'
@@ -238,11 +239,20 @@ app.all('/mcp', async (c) => {
   const auth = c.req.header('authorization')
   const key = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null
   const user = key ? userFromAccessToken(key) : null
-  // Without a working key Claude can still list the tools; using one explains how to connect.
-  const reason =
-    key && !user
-      ? "Weft doesn't recognise Claude's key (it may have been revoked). In Weft, open your account menu, choose Connect Claude, then Connect Claude on this computer."
-      : undefined
+  // Without a working key Claude can still list the tools; using one explains how to connect,
+  // in the terms of how this Claude was set up (the connector says).
+  const setup = c.req.header('x-weft-setup')
+  const fix =
+    setup === 'settings'
+      ? "In Weft, create a new key (your account menu, Connect Claude, On another computer) and put it in Claude's settings for Weft: in Claude Desktop, Settings, then Extensions, then Weft, then Configure."
+      : setup === 'file'
+        ? 'In Weft, open your account menu, choose Connect Claude, then Connect Claude on this computer.'
+        : 'In Weft, open your account menu and choose Connect Claude.'
+  const reason = user
+    ? undefined
+    : key
+      ? `Weft doesn't recognise Claude's key (it may have been revoked). ${fix}`
+      : `Weft isn't connected to your account yet. ${fix} Then try again.`
   if (c.req.method !== 'POST') {
     return c.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null }, 405, { Allow: 'POST' })
   }
@@ -266,7 +276,13 @@ app.all('/mcp', async (c) => {
  * Connecting Claude on this computer writes files here (a key file, Claude
  * Desktop's settings), so it's only offered to someone at this computer.
  */
-const fromThisComputer = (c: Context<Env>) => isLoopback(getConnInfo(c).remote.address)
+const fromThisComputer = (c: Context<Env>) => isThisComputer(getConnInfo(c).remote.address)
+
+/**
+ * The Weft address for Claude on another computer: the one that computer
+ * reached us at, or (asked from here) this computer's network address.
+ */
+const addressForOthers = (c: Context<Env>) => (fromThisComputer(c) ? (config.teamUrl ?? config.agentUrl) : new URL(c.req.url).origin)
 
 /** What the "Connect Claude" dialog needs: whether one-click connecting is possible, and settings for doing it by hand. */
 app.get('/api/connect', requireUser, (c) => {
@@ -274,6 +290,9 @@ app.get('/api/connect', requireUser, (c) => {
   const saved = local ? readConnectorFile() : null
   return c.json({
     serverUrl: config.agentUrl,
+    /** Null while Weft is only open on this computer. */
+    teamUrl: config.teamUrl,
+    otherUrl: addressForOthers(c),
     connectorPath: config.connectorPath,
     connectorBuilt: existsSync(config.connectorPath),
     // The Node that runs this server, so Claude Desktop doesn't depend on its PATH.
@@ -286,6 +305,20 @@ app.get('/api/connect', requireUser, (c) => {
           desktopHasWeft: claudeDesktopHasWeft(),
         }
       : { available: false },
+  })
+})
+
+/** "Weft for Claude", the Claude Desktop extension for another computer, pointed at this server. */
+app.get('/api/connect/extension', requireUser, (c) => {
+  if (!existsSync(config.connectorPath)) {
+    return c.json({ error: "The connector isn't built yet. In the Weft folder, run npm run build -w @weft/mcp (npm run dev does it too)." }, 503)
+  }
+  return new Response(new Uint8Array(claudeExtension(addressForOthers(c))), {
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': 'attachment; filename="Weft.mcpb"',
+      'Cache-Control': 'no-store',
+    },
   })
 })
 

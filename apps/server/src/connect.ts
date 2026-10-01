@@ -112,4 +112,11 @@ export function claudeDesktopHasWeft(): boolean {
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
-export const isLoopback = (address: string | undefined): boolean => !!address && LOOPBACK.has(address)
+
+/** A request from this computer itself: over loopback, or to one of its own network addresses. */
+export function isThisComputer(address: string | undefined): boolean {
+  if (!address) return false
+  if (LOOPBACK.has(address)) return true
+  const plain = address.replace(/^::ffff:/i, '').toLowerCase()
+  return Object.values(os.networkInterfaces()).some((addresses) => addresses?.some((a) => a.address.toLowerCase() === plain))
+}

@@ -7,9 +7,10 @@
  * It finds the server and its key in ~/.weft/connector.json, which Weft
  * writes when you choose Connect Claude on this computer. The file is read
  * on every request, so connecting (or reconnecting) needs no restart.
- * For another computer, set these instead:
- *   WEFT_URL    the Weft server, e.g. http://127.0.0.1:8787
- *   WEFT_TOKEN  an access token from Weft (your menu: Connect Claude)
+ * On another computer, the "Weft for Claude" extension sets these instead
+ * (from what you enter when installing it):
+ *   WEFT_URL    the Weft server, e.g. http://10.0.0.5:8787
+ *   WEFT_TOKEN  a key from Weft (your menu: Connect Claude)
  */
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -25,31 +26,45 @@ const log = (...parts: unknown[]) => console.error('[weft]', ...parts)
 const KEY_FILE = process.env.WEFT_CONNECTOR_FILE || path.join(os.homedir(), '.weft', 'connector.json')
 const trimUrl = (url: string) => url.replace(/\/+$/, '')
 
-/** The server and key: from the environment if set, otherwise from the file Weft saved. */
-async function settings(): Promise<{ url: string; token: string | null }> {
-  const envUrl = process.env.WEFT_URL ? trimUrl(process.env.WEFT_URL) : null
+/**
+ * The server and key: from the environment if set (the extension's
+ * settings, or a setup by hand), otherwise from the file Weft saved.
+ */
+async function settings(): Promise<{ url: string; token: string | null; from: 'settings' | 'file' }> {
+  const envUrl = process.env.WEFT_URL?.trim() ? trimUrl(process.env.WEFT_URL.trim()) : null
   const envToken = process.env.WEFT_TOKEN?.trim()
-  if (envToken) return { url: envUrl ?? 'http://127.0.0.1:8787', token: envToken }
+  if (envToken) return { url: envUrl ?? 'http://127.0.0.1:8787', token: envToken, from: 'settings' }
   try {
     const saved = JSON.parse(await readFile(KEY_FILE, 'utf8')) as { url?: unknown; token?: unknown }
     return {
       url: envUrl ?? (typeof saved.url === 'string' && saved.url ? trimUrl(saved.url) : 'http://127.0.0.1:8787'),
       token: typeof saved.token === 'string' && saved.token ? saved.token : null,
+      from: 'file',
     }
   } catch {
-    return { url: envUrl ?? 'http://127.0.0.1:8787', token: null }
+    return { url: envUrl ?? 'http://127.0.0.1:8787', token: null, from: 'file' }
   }
 }
 
 const start = await settings()
 const serverUrl = start.url
-if (!start.token) log(`No key yet. In Weft, open your account menu and choose Connect Claude. (Looked in ${KEY_FILE}.)`)
+/** Weft runs on this computer (rather than a teammate's). */
+const weftIsHere = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(serverUrl)
+if (!start.token) {
+  log(
+    start.from === 'settings'
+      ? "No key yet. In Weft, create one (your account menu, Connect Claude, On another computer) and add it in Claude's settings for Weft."
+      : `No key yet. In Weft, open your account menu and choose Connect Claude. (Looked in ${KEY_FILE}.)`,
+  )
+}
 
 /** Requests to the server carry the current key, so a new one works without restarting Claude. */
 async function withKey(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  const { token } = await settings()
+  const { token, from } = await settings()
   const headers = new Headers(init?.headers)
   if (token) headers.set('authorization', `Bearer ${token}`)
+  // So the server's advice about keys fits how this Claude was set up.
+  headers.set('x-weft-setup', from)
   return fetch(input, { ...init, headers })
 }
 
@@ -95,14 +110,14 @@ async function uploadLocalFile(args: Record<string, unknown>): Promise<Record<st
   return { ...rest, hash, name: typeof args.name === 'string' && args.name ? args.name : path.basename(full) }
 }
 
-const describe = (error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error)
-  return /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(message)
-    ? `Can't reach Weft at ${serverUrl}. Start it: double-click Start Weft.cmd in the Weft folder (or run npm run dev there), then try again.`
-    : message
-}
+const UNREACHABLE = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH/i
+const unreachable = (error: unknown) => UNREACHABLE.test(error instanceof Error ? error.message : String(error))
 
-const unreachable = (error: unknown) => /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(error instanceof Error ? error.message : String(error))
+const howToStart = weftIsHere
+  ? 'Start it: double-click Start Weft.cmd in the Weft folder (or run npm run dev there)'
+  : 'Check that Weft is running on the computer that hosts it (started with Start Weft for the team.cmd) and that this computer is on the same network'
+
+const describe = (error: unknown) => (unreachable(error) ? `Can't reach Weft at ${serverUrl}. ${howToStart}, then try again.` : error instanceof Error ? error.message : String(error))
 
 /**
  * What the server last said about itself and its tools, so Claude still sees
@@ -141,7 +156,7 @@ function offlineResult(method: string, params: Record<string, unknown> | undefin
 let watching: ReturnType<typeof setInterval> | null = null
 function waitForServer(): void {
   if (watching) return
-  log(`Can't reach Weft at ${serverUrl} yet. Start it (Start Weft.cmd, or npm run dev in the Weft folder); Claude will pick it up.`)
+  log(`Can't reach Weft at ${serverUrl} yet. ${howToStart}; Claude will pick it up.`)
   watching = setInterval(async () => {
     const up = await fetch(`${serverUrl}/api/health`).then((r) => r.ok, () => false)
     if (!up || !watching) return

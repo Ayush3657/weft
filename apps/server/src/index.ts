@@ -6,7 +6,14 @@ import { startServer } from './server'
 const running = await startServer({ port: config.port, host: config.host })
 log.info(`Weft server on http://${config.host}:${running.port}`)
 log.info(`Data: ${config.dataDir}`)
-if (config.devLogin) log.warn('Dev sign-in is on (name + email, no password). Turn it off before sharing the server.')
+if (config.teamUrl) log.info(`Open to your network: teammates open Weft at ${config.teamUrl}`)
+if (config.devLogin) {
+  log.warn(
+    config.teamUrl
+      ? 'Dev sign-in is on (name + email, no password), so anyone on your network can sign in as anyone. Keep it to a network you trust.'
+      : 'Dev sign-in is on (name + email, no password). Turn it off before sharing the server.',
+  )
+}
 
 let stopping = false
 async function shutdown(signal: string) {

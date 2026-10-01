@@ -41,31 +41,27 @@ Each project folder holds `project.sync` (what Weft opens), `project.json` (a re
 
 Claude can read and edit your projects through MCP: board a script, rewrite VO to fit a length, make a cutdown, write image prompts, or attach a Blender render to a frame. Its edits show up live for everyone, grouped into change sets that you keep or undo from the bar in the app.
 
+**On the computer Weft runs on:**
+
 1. In Weft, open your account menu, choose **Connect Claude**, then **Connect Claude on this computer**. Weft makes a key for Claude, saves it in your user folder (`~/.weft/connector.json`) and adds Weft to Claude Desktop's settings.
 2. Quit Claude Desktop fully (from its icon by the clock) and open it again.
 3. In a new chat, ask Claude "List my Weft projects". Weft's ready-made prompts are in Claude's attach menu.
 
-Claude Code sessions opened in this folder offer Weft too (from `.mcp.json`). For Claude on another computer, the same dialog shows how to set it up by hand. The connector is built by `npm run dev` (or `npm run build -w @weft/mcp`). Claude's changes can be undone from the app until the server restarts.
+This setup belongs to the computer (its Windows account), not to a Claude account: whoever is signed in to Claude here works in Weft as you. Claude Code sessions opened in this folder offer Weft too (from `.mcp.json`).
 
-## Keep projects in a folder
+**On other computers** (a teammate's, or another of yours): each person connects their own Claude with their own key, so Claude's edits are theirs. Weft has to be open to the network first (see below). Then, on that computer, signed in to Weft as themselves: account menu, **Connect Claude**, **On another computer**. That downloads **Weft for Claude** (`Weft.mcpb`), an extension that Claude Desktop installs with a double-click and runs with its own Node, so there's nothing else to install. Claude asks for a key, which they create in the same dialog, and fills in Weft's address. Claude Code users get a one-line command there instead.
 
-In Chrome or Edge, Weft can keep a copy of your projects in folders on your computer:
+The connector is built by `npm run dev` (or `npm run build -w @weft/mcp`). Claude's changes can be undone from the app until the server restarts.
 
-- **A vault folder** (on the projects page): every project you open gets a folder of its own there.
-- **A folder for one project**: use the folder button in the project's header.
-- **Open from folder** (projects page): opens a project folder from anywhere, for example one copied from another computer. It keeps its id, so it's the same project, and its pictures upload if the server doesn't have them.
+## Let your team in
 
-Each project folder holds `project.sync` (what Weft opens), `project.json` (a readable copy), `script.md`, `notes/` and `media/` (the original pictures, clips and sound). Weft keeps it up to date while the project is open and merges in changes made elsewhere when you reopen it, so the folder can live in OneDrive or Dropbox. The browser asks once per visit before Weft can write to the folder again; installed as an app, it can remember.
+Weft normally only answers on this computer. To let teammates on the same network use it (and connect their Claude):
 
-## Use it with Claude
+1. Close Weft if it's running, then double-click **Start Weft for the team.cmd**. It builds the app and runs it for everyone on your network.
+2. The first time, Windows may ask whether Node.js can use the network. Allow it on private networks.
+3. The window shows the address teammates open (for example `http://10.0.0.5:8787`). The Connect Claude dialog shows it too.
 
-Claude can read and edit your projects through MCP: board a script, rewrite VO to fit a length, make a cutdown, write image prompts, or attach a Blender render to a frame. Its edits show up live for everyone, grouped into change sets that you keep or undo from the bar in the app.
-
-1. In Weft, open your account menu and choose **Connect Claude**, then make a key.
-2. Paste the settings it shows into Claude Desktop (Settings, Developer, Edit Config) and restart it, or run the command it shows for Claude Code.
-3. Ask Claude "List my Weft projects". Weft's ready-made prompts are in Claude's attach menu.
-
-The connector Claude Desktop runs is built by `npm run dev` (or `npm run build -w @weft/mcp`). Claude's changes can be undone from the app until the server restarts.
+Sign-in is still dev mode (a name and an email, no password), so anyone on your network who opens that address can sign in, as anyone. Only do this on a network you trust; Google and Microsoft sign-in will replace it. To set the address yourself (a fixed IP or a computer name), put `PUBLIC_URL` in `apps/server/.env`; see `.env.example`.
 
 ## Check it
 
