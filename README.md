@@ -6,6 +6,10 @@ Storyboards for ads and films. You direct, AI assists. The product spec is in [d
 
 Needs Node 22 or newer.
 
+On Windows, double-click **Start Weft.cmd** in this folder. It installs what's needed on first run, starts Weft and opens it in your browser. Keep its window open while you (or Claude) use Weft; close it to stop Weft. To start Weft whenever you sign in to Windows, put a shortcut to it in your Startup folder (Win+R, `shell:startup`).
+
+Or from a terminal:
+
 ```bash
 npm install
 npm run dev

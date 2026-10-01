@@ -1,7 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,7 +52,7 @@ beforeAll(async () => {
   // Started the way Claude Desktop starts it: node, the file, and two settings.
   client = new Client({ name: 'claude-desktop-test', version: '1.0.0' })
   await client.connect(
-    new StdioClientTransport({ command: process.execPath, args: [connector], env: { WEFT_URL: base, WEFT_TOKEN: token }, stderr: 'pipe' }),
+    new StdioClientTransport({ command: process.execPath, args: [connector], env: { WEFT_URL: base, WEFT_TOKEN: token, WEFT_CONNECTOR_FILE: path.join(dataDir, 'first', 'connector.json') }, stderr: 'pipe' }),
   )
 })
 
@@ -110,4 +112,41 @@ describe('the Weft connector', () => {
     expect(missing.isError).toBe(true)
     expect(textOf(missing)).toContain("There's no file at")
   })
+
+  it('starts even when Weft is not running yet, and picks it up once it is', async () => {
+    const free = await new Promise<number>((done) => {
+      const probe = createServer().listen(0, '127.0.0.1', () => {
+        const { port } = probe.address() as { port: number }
+        probe.close(() => done(port))
+      })
+    })
+    const url = `http://127.0.0.1:${free}`
+    // Claude opened before Weft: the connector still starts, with the tools it saw last time.
+    const early = new Client({ name: 'claude-desktop-test', version: '1.0.0' })
+    let told: () => void = () => {}
+    const backAgain = new Promise<void>((done) => (told = done))
+    early.setNotificationHandler(ToolListChangedNotificationSchema, () => told())
+    await early.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [connector],
+        env: { WEFT_URL: url, WEFT_TOKEN: token, WEFT_CONNECTOR_FILE: path.join(dataDir, 'first', 'connector.json') },
+        stderr: 'pipe',
+      }),
+    )
+    expect(early.getServerVersion()?.name).toBe('weft')
+    expect((await early.listTools()).tools.length).toBeGreaterThan(20)
+    const down = (await early.callTool({ name: 'list_projects', arguments: {} })) as ToolResult
+    expect(down.isError).toBe(true)
+    expect(textOf(down)).toContain('Start Weft.cmd')
+
+    // Then Weft starts: Claude is told to look again, and calls go through.
+    const second = await startServer({ port: free, host: '127.0.0.1' })
+    await backAgain
+    const up = (await early.callTool({ name: 'list_projects', arguments: {} })) as ToolResult
+    expect(up.isError).toBeFalsy()
+    expect(textOf(up)).toContain('Render test')
+    await early.close()
+    await second.close()
+  }, 20000)
 })

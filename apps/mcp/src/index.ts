@@ -15,7 +15,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -98,16 +98,70 @@ async function uploadLocalFile(args: Record<string, unknown>): Promise<Record<st
 const describe = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   return /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(message)
-    ? `Can't reach Weft at ${serverUrl}. Make sure it's running (npm run dev in the Weft folder).`
+    ? `Can't reach Weft at ${serverUrl}. Start it: double-click Start Weft.cmd in the Weft folder (or run npm run dev there), then try again.`
     : message
+}
+
+const unreachable = (error: unknown) => /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(error instanceof Error ? error.message : String(error))
+
+/**
+ * What the server last said about itself and its tools, so Claude still sees
+ * Weft when it starts before the server does. Tool calls then say to start
+ * Weft, and Claude is told to look again once the server is back.
+ */
+const CACHE_FILE = path.join(path.dirname(KEY_FILE), 'claude-cache.json')
+type Cache = { initialize?: Record<string, unknown>; 'tools/list'?: Record<string, unknown>; 'prompts/list'?: Record<string, unknown> }
+const CACHED = new Set(['initialize', 'tools/list', 'prompts/list'])
+let cache: Cache = await readFile(CACHE_FILE, 'utf8')
+  .then((text) => JSON.parse(text) as Cache)
+  .catch(() => ({}))
+
+function remember(method: keyof Cache, result: Record<string, unknown>): void {
+  cache = { ...cache, [method]: result }
+  void mkdir(path.dirname(CACHE_FILE), { recursive: true })
+    .then(() => writeFile(CACHE_FILE, JSON.stringify(cache)))
+    .catch((error) => log(`Couldn't save ${CACHE_FILE}:`, error))
+}
+
+function offlineResult(method: string, params: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  if (method === 'initialize') {
+    const known = cache.initialize ?? { serverInfo: { name: 'weft', version: '0.1.0' } }
+    return {
+      ...known,
+      protocolVersion: typeof params?.protocolVersion === 'string' ? params.protocolVersion : known.protocolVersion,
+      capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
+    }
+  }
+  if (method === 'tools/list') return cache['tools/list'] ?? { tools: [] }
+  if (method === 'prompts/list') return cache['prompts/list'] ?? { prompts: [] }
+  return null
+}
+
+/** While the server is down, checks for it every few seconds and tells Claude when it's back. */
+let watching: ReturnType<typeof setInterval> | null = null
+function waitForServer(): void {
+  if (watching) return
+  log(`Can't reach Weft at ${serverUrl} yet. Start it (Start Weft.cmd, or npm run dev in the Weft folder); Claude will pick it up.`)
+  watching = setInterval(async () => {
+    const up = await fetch(`${serverUrl}/api/health`).then((r) => r.ok, () => false)
+    if (!up || !watching) return
+    clearInterval(watching)
+    watching = null
+    log(`Weft is up at ${serverUrl}.`)
+    await local.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })
+    await local.send({ jsonrpc: '2.0', method: 'notifications/prompts/list_changed' })
+  }, 3000)
 }
 
 const remote = new StreamableHTTPClientTransport(new URL(`${serverUrl}/mcp`), { fetch: withKey })
 const local = new StdioServerTransport()
+/** Requests whose answers are worth keeping, by id. */
+const pending = new Map<string | number, keyof Cache>()
 
 async function forward(message: JSONRPCMessage): Promise<void> {
   const request = 'method' in message && 'id' in message ? message : null
   try {
+    if (request && CACHED.has(request.method)) pending.set(request.id, request.method as keyof Cache)
     if (request?.method === 'tools/call') {
       const params = request.params as { name?: string; arguments?: Record<string, unknown> } | undefined
       if (params?.name === 'attach_media' && typeof params.arguments?.path === 'string') {
@@ -117,8 +171,17 @@ async function forward(message: JSONRPCMessage): Promise<void> {
     await remote.send(message)
   } catch (error) {
     if (!request) {
-      log(describe(error))
+      if (!unreachable(error)) log(describe(error))
       return
+    }
+    pending.delete(request.id)
+    if (unreachable(error)) {
+      waitForServer()
+      const offline = offlineResult(request.method, request.params as Record<string, unknown> | undefined)
+      if (offline) {
+        await local.send({ jsonrpc: '2.0', id: request.id, result: offline })
+        return
+      }
     }
     // Answer the request here so Claude sees what went wrong.
     await local.send(
@@ -130,10 +193,18 @@ async function forward(message: JSONRPCMessage): Promise<void> {
 }
 
 local.onmessage = (message) => void forward(message)
-remote.onmessage = (message) => void local.send(message)
-remote.onerror = (error) => log(describe(error))
+remote.onmessage = (message) => {
+  if ('result' in message && pending.has(message.id)) {
+    remember(pending.get(message.id)!, message.result)
+    pending.delete(message.id)
+  }
+  void local.send(message)
+}
+remote.onerror = (error) => {
+  if (!unreachable(error)) log(describe(error))
+}
 local.onclose = () => void remote.close().finally(() => process.exit(0))
 
 await remote.start()
 await local.start()
-log(`connected to ${serverUrl}`)
+log(`talking to ${serverUrl}`)
