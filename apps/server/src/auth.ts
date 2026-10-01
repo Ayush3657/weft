@@ -134,6 +134,13 @@ export function userFromAccessToken(token: string | undefined): PublicUser | nul
   return toPublic(row)
 }
 
+/** Whose key this is, without counting it as used. */
+export function accessTokenOwner(token: string): string | null {
+  if (!token.startsWith('weft_')) return null
+  const row = db.prepare('SELECT user_id FROM access_tokens WHERE token_hash = ?').get(hashToken(token)) as { user_id: string } | undefined
+  return row?.user_id ?? null
+}
+
 export function listAccessTokens(userId: string): Array<{ id: string; name: string; createdAt: number; lastUsedAt: number | null }> {
   return (
     db

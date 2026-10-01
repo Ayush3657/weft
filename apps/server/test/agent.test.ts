@@ -88,19 +88,25 @@ afterAll(async () => {
 })
 
 describe('Claude through MCP', () => {
-  it('refuses callers without an access token', async () => {
-    const res = await fetch(`${base}/mcp`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
-    })
-    expect(res.status).toBe(401)
-    const withCookie = await fetch(`${base}/mcp`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', cookie },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
-    })
-    expect(withCookie.status).toBe(401)
+  it('shows the tools without a key, but only acts with one (a session cookie never counts)', async () => {
+    const connectWith = async (headers: Record<string, string>) => {
+      const client = new Client({ name: 'no-key', version: '1.0.0' })
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }))
+      return client
+    }
+    for (const [headers, message] of [
+      [{}, "isn't connected to your account yet"],
+      [{ cookie }, "isn't connected to your account yet"],
+      [{ Authorization: 'Bearer weft_revoked-or-made-up' }, "doesn't recognise Claude's key"],
+    ] as const) {
+      const client = await connectWith(headers)
+      expect((await client.listTools()).tools.length).toBeGreaterThan(20)
+      const result = (await client.callTool({ name: 'list_projects', arguments: {} })) as ToolResult
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).toContain(message)
+      expect(textOf(result)).not.toContain('Skyline')
+      await client.close()
+    }
   })
 
   it('offers the tools and prompts', async () => {

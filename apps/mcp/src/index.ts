@@ -4,7 +4,10 @@
  * uploads files from this computer when Claude attaches one by its path
  * (a Blender render, say), since the server can't read your disk.
  *
- * Settings come from the environment:
+ * It finds the server and its key in ~/.weft/connector.json, which Weft
+ * writes when you choose Connect Claude on this computer. The file is read
+ * on every request, so connecting (or reconnecting) needs no restart.
+ * For another computer, set these instead:
  *   WEFT_URL    the Weft server, e.g. http://127.0.0.1:8787
  *   WEFT_TOKEN  an access token from Weft (your menu: Connect Claude)
  */
@@ -12,19 +15,42 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-
-const serverUrl = (process.env.WEFT_URL || 'http://127.0.0.1:8787').replace(/\/+$/, '')
-const token = (process.env.WEFT_TOKEN ?? '').trim()
 
 // stdout carries the protocol, so anything for people goes to stderr (Claude Desktop keeps it in its logs).
 const log = (...parts: unknown[]) => console.error('[weft]', ...parts)
 
-if (!token.startsWith('weft_')) {
-  log('Set WEFT_TOKEN to a Weft access token. Make one in Weft from your account menu: Connect Claude.')
-  process.exit(1)
+const KEY_FILE = process.env.WEFT_CONNECTOR_FILE || path.join(os.homedir(), '.weft', 'connector.json')
+const trimUrl = (url: string) => url.replace(/\/+$/, '')
+
+/** The server and key: from the environment if set, otherwise from the file Weft saved. */
+async function settings(): Promise<{ url: string; token: string | null }> {
+  const envUrl = process.env.WEFT_URL ? trimUrl(process.env.WEFT_URL) : null
+  const envToken = process.env.WEFT_TOKEN?.trim()
+  if (envToken) return { url: envUrl ?? 'http://127.0.0.1:8787', token: envToken }
+  try {
+    const saved = JSON.parse(await readFile(KEY_FILE, 'utf8')) as { url?: unknown; token?: unknown }
+    return {
+      url: envUrl ?? (typeof saved.url === 'string' && saved.url ? trimUrl(saved.url) : 'http://127.0.0.1:8787'),
+      token: typeof saved.token === 'string' && saved.token ? saved.token : null,
+    }
+  } catch {
+    return { url: envUrl ?? 'http://127.0.0.1:8787', token: null }
+  }
+}
+
+const start = await settings()
+const serverUrl = start.url
+if (!start.token) log(`No key yet. In Weft, open your account menu and choose Connect Claude. (Looked in ${KEY_FILE}.)`)
+
+/** Requests to the server carry the current key, so a new one works without restarting Claude. */
+async function withKey(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const { token } = await settings()
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  return fetch(input, { ...init, headers })
 }
 
 const MEDIA_TYPES: Record<string, string> = {
@@ -60,11 +86,7 @@ async function uploadLocalFile(args: Record<string, unknown>): Promise<Record<st
   if (!info?.isFile()) throw new Error(`There's no file at ${full}.`)
   const data = await readFile(full)
   const hash = createHash('sha256').update(data).digest('hex')
-  const res = await fetch(`${serverUrl}/api/media/${hash}`, {
-    method: 'PUT',
-    headers: { authorization: `Bearer ${token}`, 'content-type': type },
-    body: data,
-  })
+  const res = await withKey(`${serverUrl}/api/media/${hash}`, { method: 'PUT', headers: { 'content-type': type }, body: data })
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(body.error ?? `Uploading ${path.basename(full)} failed (${res.status}).`)
@@ -76,18 +98,70 @@ async function uploadLocalFile(args: Record<string, unknown>): Promise<Record<st
 const describe = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   return /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(message)
-    ? `Can't reach Weft at ${serverUrl}. Make sure it's running (npm run dev in the Weft folder).`
+    ? `Can't reach Weft at ${serverUrl}. Start it: double-click Start Weft.cmd in the Weft folder (or run npm run dev there), then try again.`
     : message
 }
 
-const remote = new StreamableHTTPClientTransport(new URL(`${serverUrl}/mcp`), {
-  requestInit: { headers: { Authorization: `Bearer ${token}` } },
-})
+const unreachable = (error: unknown) => /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(error instanceof Error ? error.message : String(error))
+
+/**
+ * What the server last said about itself and its tools, so Claude still sees
+ * Weft when it starts before the server does. Tool calls then say to start
+ * Weft, and Claude is told to look again once the server is back.
+ */
+const CACHE_FILE = path.join(path.dirname(KEY_FILE), 'claude-cache.json')
+type Cache = { initialize?: Record<string, unknown>; 'tools/list'?: Record<string, unknown>; 'prompts/list'?: Record<string, unknown> }
+const CACHED = new Set(['initialize', 'tools/list', 'prompts/list'])
+let cache: Cache = await readFile(CACHE_FILE, 'utf8')
+  .then((text) => JSON.parse(text) as Cache)
+  .catch(() => ({}))
+
+function remember(method: keyof Cache, result: Record<string, unknown>): void {
+  cache = { ...cache, [method]: result }
+  void mkdir(path.dirname(CACHE_FILE), { recursive: true })
+    .then(() => writeFile(CACHE_FILE, JSON.stringify(cache)))
+    .catch((error) => log(`Couldn't save ${CACHE_FILE}:`, error))
+}
+
+function offlineResult(method: string, params: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  if (method === 'initialize') {
+    const known = cache.initialize ?? { serverInfo: { name: 'weft', version: '0.1.0' } }
+    return {
+      ...known,
+      protocolVersion: typeof params?.protocolVersion === 'string' ? params.protocolVersion : known.protocolVersion,
+      capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
+    }
+  }
+  if (method === 'tools/list') return cache['tools/list'] ?? { tools: [] }
+  if (method === 'prompts/list') return cache['prompts/list'] ?? { prompts: [] }
+  return null
+}
+
+/** While the server is down, checks for it every few seconds and tells Claude when it's back. */
+let watching: ReturnType<typeof setInterval> | null = null
+function waitForServer(): void {
+  if (watching) return
+  log(`Can't reach Weft at ${serverUrl} yet. Start it (Start Weft.cmd, or npm run dev in the Weft folder); Claude will pick it up.`)
+  watching = setInterval(async () => {
+    const up = await fetch(`${serverUrl}/api/health`).then((r) => r.ok, () => false)
+    if (!up || !watching) return
+    clearInterval(watching)
+    watching = null
+    log(`Weft is up at ${serverUrl}.`)
+    await local.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })
+    await local.send({ jsonrpc: '2.0', method: 'notifications/prompts/list_changed' })
+  }, 3000)
+}
+
+const remote = new StreamableHTTPClientTransport(new URL(`${serverUrl}/mcp`), { fetch: withKey })
 const local = new StdioServerTransport()
+/** Requests whose answers are worth keeping, by id. */
+const pending = new Map<string | number, keyof Cache>()
 
 async function forward(message: JSONRPCMessage): Promise<void> {
   const request = 'method' in message && 'id' in message ? message : null
   try {
+    if (request && CACHED.has(request.method)) pending.set(request.id, request.method as keyof Cache)
     if (request?.method === 'tools/call') {
       const params = request.params as { name?: string; arguments?: Record<string, unknown> } | undefined
       if (params?.name === 'attach_media' && typeof params.arguments?.path === 'string') {
@@ -97,8 +171,17 @@ async function forward(message: JSONRPCMessage): Promise<void> {
     await remote.send(message)
   } catch (error) {
     if (!request) {
-      log(describe(error))
+      if (!unreachable(error)) log(describe(error))
       return
+    }
+    pending.delete(request.id)
+    if (unreachable(error)) {
+      waitForServer()
+      const offline = offlineResult(request.method, request.params as Record<string, unknown> | undefined)
+      if (offline) {
+        await local.send({ jsonrpc: '2.0', id: request.id, result: offline })
+        return
+      }
     }
     // Answer the request here so Claude sees what went wrong.
     await local.send(
@@ -110,10 +193,18 @@ async function forward(message: JSONRPCMessage): Promise<void> {
 }
 
 local.onmessage = (message) => void forward(message)
-remote.onmessage = (message) => void local.send(message)
-remote.onerror = (error) => log(describe(error))
+remote.onmessage = (message) => {
+  if ('result' in message && pending.has(message.id)) {
+    remember(pending.get(message.id)!, message.result)
+    pending.delete(message.id)
+  }
+  void local.send(message)
+}
+remote.onerror = (error) => {
+  if (!unreachable(error)) log(describe(error))
+}
 local.onclose = () => void remote.close().finally(() => process.exit(0))
 
 await remote.start()
 await local.start()
-log(`connected to ${serverUrl}`)
+log(`talking to ${serverUrl}`)

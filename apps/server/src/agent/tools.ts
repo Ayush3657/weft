@@ -238,10 +238,22 @@ Working well:
 - Ask before deleting frames. Refer to frames by shot number or id.
 - Pictures come from people or from attach_media (for example a Blender render saved on this computer).`
 
-export function createAgentServer(user: PublicUser): McpServer {
+const NOT_CONNECTED =
+  "Weft isn't connected to your account yet. In Weft, open your account menu, choose Connect Claude, then Connect Claude on this computer. Then try again; Claude doesn't need restarting."
+
+/**
+ * Weft's tools for one caller. Without a key (`caller` null) Claude can still
+ * see the tools, and each one explains how to connect.
+ */
+export function createAgentServer(caller: PublicUser | null, reason: string = NOT_CONNECTED): McpServer {
   const server = new McpServer({ name: 'weft', title: 'Weft', version: '0.1.0' }, { instructions: INSTRUCTIONS })
+  const me = (): PublicUser => {
+    if (!caller) throw new AgentError(reason)
+    return caller
+  }
 
   const open = async (ref: string): Promise<{ session: AgentSession; s: ProjectSnapshot; id: string; title: string }> => {
+    const user = me()
     const summary = findProject(ref)
     const session = await sessionFor(summary.id, user)
     return { session, s: session.snapshot(), id: summary.id, title: summary.title }
@@ -253,6 +265,7 @@ export function createAgentServer(user: PublicUser): McpServer {
     'list_projects',
     { title: 'List projects', description: 'All projects on this Weft server, newest first.', annotations: { readOnlyHint: true } },
     guarded(async () => {
+      me()
       const all = listProjects()
       if (!all.length) return text('There are no projects yet. Make one with create_project.')
       return text(
@@ -479,7 +492,7 @@ export function createAgentServer(user: PublicUser): McpServer {
       },
     },
     guarded(async ({ title, type, aspect, target_seconds }) => {
-      const project = createProject(user.id, {
+      const project = createProject(me().id, {
         title,
         type,
         ...(aspect ? { aspect: aspect as (typeof ASPECT_RATIOS)[number] } : {}),
@@ -871,7 +884,7 @@ export function createAgentServer(user: PublicUser): McpServer {
       } else if (url) {
         const file = await downloadPublic(url, config.maxUploadBytes)
         if (!MEDIA_TYPES.test(file.contentType)) throw new AgentError(`That address isn't an image, video or audio file (it's ${file.contentType || 'unknown'})`)
-        const row = await storeMediaBuffer(new Uint8Array(file.data), file.contentType, user.id)
+        const row = await storeMediaBuffer(new Uint8Array(file.data), file.contentType, me().id)
         ;({ hash: fileHash, mime, size } = row)
         fileName ||= decodeURIComponent(file.url.pathname.split('/').pop() || '') || file.url.hostname
       } else if (filePath) {
@@ -896,7 +909,7 @@ export function createAgentServer(user: PublicUser): McpServer {
             size,
             width: dims?.width ?? null,
             height: dims?.height ?? null,
-            createdBy: user.id,
+            createdBy: me().id,
           })
           if (to === 'frame_picture') session.project.addMediaVersion(frameId!, assetId, { label: 'From Claude' })
           else if (to === 'frame_reference') session.project.addReference(frameId!, assetId)
@@ -991,7 +1004,7 @@ export function createAgentServer(user: PublicUser): McpServer {
               title: preview?.title || link,
               preview: preview?.image ?? null,
               site: preview?.site ?? '',
-              createdBy: user.id,
+              createdBy: me().id,
             })
             session.project.addMoodItem({ kind: 'asset', assetId, x, y, w: 280, h: preview?.image ? 236 : 112 })
             x += 304
