@@ -29,8 +29,9 @@ describe('project folders', () => {
     p.toggleFrameTag(firstFrameId, priya)
     p.appendFrame(mainCutId, { description: 'Logo', onScreenText: 'SKYLINE TOWERS', durationMode: 'manual', duration: 2 })
 
-    const out = exportProject(p.snapshot(), { projectId: 'proj123', notes: [{ id: 'notes', title: 'Notes', markdown: '# Ideas' }] })
-    expect(out).toMatchObject({ weft: 1, projectId: 'proj123', title: 'Skyline Towers 30s', type: 'ad' })
+    const place = { space: 'ASBL Ads', spaceId: 'space1', folders: ['Broadway'], folderId: 'folder1' }
+    const out = exportProject(p.snapshot(), { projectId: 'proj123', notes: [{ id: 'notes', title: 'Notes', markdown: '# Ideas' }], place })
+    expect(out).toMatchObject({ weft: 1, projectId: 'proj123', title: 'Skyline Towers 30s', type: 'ad', place })
     expect(out.savedAt).toBeUndefined()
     expect(out.cuts[0]!.shots.map((s) => s.shot)).toEqual(['1', '2'])
     const first = out.frames.find((f) => f.id === firstFrameId)!

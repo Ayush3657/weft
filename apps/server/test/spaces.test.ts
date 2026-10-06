@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import * as Y from 'yjs'
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), 'weft-spaces-test-'))
 process.env.DATA_DIR = dataDir
@@ -144,6 +145,15 @@ describe('spaces', () => {
 
     expect((await ayush.call('DELETE', `/api/folders/${broadway}`)).status).toBe(409)
     expect((await outsider.call('DELETE', `/api/projects/${launch}`)).status).toBe(404)
+  })
+
+  it("hands a project's whole state to people in its space, for keeping a copy", async () => {
+    const res = await fetch(`${base}/api/projects/${launch}/state`, { headers: { cookie: teammate.cookie } })
+    expect(res.headers.get('content-type')).toBe('application/octet-stream')
+    const doc = new Y.Doc()
+    Y.applyUpdate(doc, new Uint8Array(await res.arrayBuffer()))
+    expect(doc.getMap('meta').get('title')).toBe('Broadway launch 30s')
+    expect((await fetch(`${base}/api/projects/${launch}/state`, { headers: { cookie: outsider.cookie } })).status).toBe(404)
   })
 })
 

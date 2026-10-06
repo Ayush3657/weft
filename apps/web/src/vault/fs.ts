@@ -84,3 +84,68 @@ export async function subfolders(dir: FileSystemDirectoryHandle): Promise<FileSy
   }
   return out
 }
+
+/** Everything directly inside a folder, read in one go (so the folder can change while you go through it). */
+export async function entries(dir: FileSystemDirectoryHandle): Promise<Array<[string, FileSystemHandle]>> {
+  const out: Array<[string, FileSystemHandle]> = []
+  for await (const entry of (dir as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) out.push(entry)
+  return out
+}
+
+type Movable = FileSystemFileHandle & { move?: (to: FileSystemDirectoryHandle, name: string) => Promise<void> }
+
+/** Moves everything in `from` into `to`. Files move in place where the browser can (fast, even for big videos), otherwise they're copied. */
+async function moveInto(from: FileSystemDirectoryHandle, to: FileSystemDirectoryHandle): Promise<void> {
+  for (const [name, entry] of await entries(from)) {
+    if (entry.kind === 'directory') {
+      const sub = await to.getDirectoryHandle(name, { create: true })
+      await moveInto(entry as FileSystemDirectoryHandle, sub)
+      await removeEmpty(from, name)
+      continue
+    }
+    const file = entry as Movable
+    let moved = false
+    if (typeof file.move === 'function') {
+      try {
+        await file.move(to, name)
+        moved = true
+      } catch {
+        // Some places (another drive, say) can't move files: copy instead.
+      }
+    }
+    if (!moved) {
+      await writeFile(to, name, await file.getFile())
+      await from.removeEntry(name)
+    }
+  }
+}
+
+/** Removes a folder only if nothing is left in it, so a move that fell short never deletes anything. */
+async function removeEmpty(parent: FileSystemDirectoryHandle, name: string): Promise<void> {
+  const dir = await parent.getDirectoryHandle(name)
+  const left = await entries(dir)
+  if (left.length) throw new Error(`Couldn't move everything out of “${name}”; ${left.length} ${left.length === 1 ? 'thing is' : 'things are'} still there.`)
+  await parent.removeEntry(name)
+}
+
+/**
+ * Moves (or renames) the folder `name` in `parent` to `newName` in `to`, and
+ * returns it there. Browsers can't move a folder in one go, so it's made anew
+ * and filled. A new name that only differs in capitals (the same folder, on
+ * Windows) goes through a temporary name.
+ */
+export async function moveFolder(parent: FileSystemDirectoryHandle, name: string, to: FileSystemDirectoryHandle, newName: string): Promise<FileSystemDirectoryHandle> {
+  const source = await parent.getDirectoryHandle(name)
+  const there = await folderIn(to, newName, false)
+  if (there && (await there.isSameEntry(source))) {
+    if (name === newName) return source
+    const temporary = `${newName}.weft-moving`
+    await moveFolder(parent, name, to, temporary)
+    return moveFolder(to, temporary, to, newName)
+  }
+  if (there) throw new Error(`There's already a folder called “${newName}” there`)
+  const target = await to.getDirectoryHandle(newName, { create: true })
+  await moveInto(source, target)
+  await removeEmpty(parent, name)
+  return target
+}

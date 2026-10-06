@@ -177,17 +177,24 @@ Start times, timecodes, and totals are always calculated per cut, never typed.
 | Cloud only | Team server (+ browser cache) | Cached | Yes |
 | Both (default) | Team server + live vault mirror | Yes | Yes |
 
-**Vault layout.** A normal folder you can back up anywhere:
+**Vault layout.** A normal folder you can back up anywhere, laid out like Weft: a folder per space, its folders inside, a folder per storyboard, and each space's and folder's library.
 
 ```
 Vault/
-  Project name/
-    project.json    readable snapshot, updated live
-    project.sync    sync state (don't edit)
-    media/          original images, videos, audio, with readable names
-    exports/        PDFs, MP4s
-    inbox/          drop files here to import (v1.5)
+  Space/
+    About.md          the library's notes
+    Library/          its media, and library.json (tags, captions)
+    Folder/
+      Storyboard/
+        project.json  readable snapshot, with where it lives in Weft
+        project.sync  sync state (don't edit)
+        script.md, notes/
+        media/        original images, videos, audio, with readable names
+        exports/      PDFs, MP4s
+        inbox/        drop files here to import (v1.5)
 ```
+
+The vault keeps every storyboard in the spaces you choose, not just the ones you open, and follows renames and moves. It never deletes: a storyboard deleted in Weft stays in the vault and can be brought back. In a cloud drive (OneDrive, Google Drive), conflict copies of project.sync are merged back in.
 
 **How the vault gets written:**
 - **v1.** In Chrome or Edge, the web app writes directly to a folder you choose, with no install. It syncs while the app is open and catches up when you reopen it.

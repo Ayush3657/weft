@@ -39,6 +39,24 @@ export function VaultButton() {
     onSelect: () => void chooseVault().catch(unlessCancelled),
   }
 
+  if (view.kind === 'none' && view.notKept) {
+    return (
+      <Menu
+        header={
+          <span className="block max-w-[260px]">
+            Your vault doesn't keep this storyboard's space. Choose the spaces it keeps under “Keep a copy on this computer” on the projects page.
+          </span>
+        }
+        trigger={
+          <IconButton label="Not kept on this computer" tooltip="Not kept in your vault">
+            <HardDrive size={16} />
+          </IconButton>
+        }
+        items={[{ ...chooseFolder, label: 'Save just this storyboard to a folder…' }]}
+      />
+    )
+  }
+
   if (view.kind === 'none') {
     return (
       <Menu

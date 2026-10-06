@@ -107,10 +107,20 @@ export interface NotesPage {
 }
 
 /** What project.json holds. */
+/** Where a project lives in Weft: its space and folders, by name and id. */
+export interface ProjectPlace {
+  space: string
+  spaceId: string
+  folders: string[]
+  folderId: string | null
+}
+
 export interface ProjectExport {
   weft: 1
   projectId: string
   title: string
+  /** Where it lives in Weft, so a folder brought back in can go home. */
+  place?: ProjectPlace
   /** Left out of a project folder's copy: the file's own date says when it was saved. */
   savedAt?: string
   type: string
@@ -154,7 +164,10 @@ export interface ProjectExport {
 }
 
 /** A readable snapshot of the whole project. Media is referred to by its file in media/. */
-export function exportProject(s: ProjectSnapshot, opts: { projectId: string; notes: readonly NotesPage[]; savedAt?: number }): ProjectExport {
+export function exportProject(
+  s: ProjectSnapshot,
+  opts: { projectId: string; notes: readonly NotesPage[]; savedAt?: number; place?: ProjectPlace | null },
+): ProjectExport {
   const labels = shotLabels(s)
   const file = (assetId: string | null | undefined) => {
     const a = assetId ? s.assets[assetId] : undefined
@@ -168,6 +181,7 @@ export function exportProject(s: ProjectSnapshot, opts: { projectId: string; not
     weft: 1,
     projectId: opts.projectId,
     title: s.meta.title,
+    ...(opts.place ? { place: opts.place } : {}),
     ...(opts.savedAt ? { savedAt: new Date(opts.savedAt).toISOString() } : {}),
     type: s.meta.type,
     aspect: s.meta.aspect,

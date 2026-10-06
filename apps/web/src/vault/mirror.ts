@@ -1,11 +1,10 @@
-import { exportProject, mediaFileName, notesToMarkdown, safeFileName, scriptsMarkdown, type NotesPage, type Project, type ProjectSnapshot } from '@weft/model'
-import * as Y from 'yjs'
-import { displayUrl } from '../lib/media'
-import { fileIn, fileNames, folderIn, folderPermission, removeFile, writeFile } from './fs'
+import type { Project, ProjectPlace } from '@weft/model'
+import type * as Y from 'yjs'
+import { ProjectFiles, savedProjectId } from './files'
+import { folderPermission } from './fs'
+import { keeper, withVaultLock } from './keeper'
 
-export const SYNC_FILE = 'project.sync'
-export const JSON_FILE = 'project.json'
-const SCRIPT_FILE = 'script.md'
+export { JSON_FILE, SYNC_FILE, savedProjectId } from './files'
 
 export type MirrorState =
   | { kind: 'starting' }
@@ -15,52 +14,50 @@ export type MirrorState =
   | { kind: 'error'; message: string }
   | { kind: 'stopped' }
 
-const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i])
-
 const isPermissionError = (error: unknown) => error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
+const isMissing = (error: unknown) => error instanceof DOMException && error.name === 'NotFoundError'
 
-/** The project id saved in a folder's project.json, if it has one. */
-export async function savedProjectId(dir: FileSystemDirectoryHandle): Promise<string | null> {
-  const file = await fileIn(dir, JSON_FILE)
-  if (!file) return null
-  try {
-    const id = (JSON.parse(await file.text()) as { projectId?: unknown }).projectId
-    return typeof id === 'string' ? id : null
-  } catch {
-    return null
-  }
-}
+/** Finds the project's folder again after it moved, with where the project now is. */
+export type Relocate = () => Promise<{ dir: FileSystemDirectoryHandle; place: ProjectPlace } | null>
 
 /**
  * Keeps a project's folder up to date while the project is open: the exact
  * sync state (project.sync), readable copies (project.json, script.md, one
  * Markdown file per notes page) and every picture, video and sound (media/).
  * On start it first merges in what the folder holds, so edits made elsewhere
- * (another computer, through a folder in OneDrive or Dropbox) come in.
+ * (another computer, through a vault in OneDrive or Google Drive) come in,
+ * along with any conflict copies a cloud drive made.
  */
 export class VaultMirror {
   private state: MirrorState = { kind: 'starting' }
   private readonly listeners = new Set<() => void>()
+  private files: ProjectFiles
+  private conflicts: string[] = []
   private timer = 0
   private firstPending = 0
   private running: Promise<void> | null = null
   private queued = false
   private stopped = false
   private listening = false
-  private lastVector: Uint8Array | null = null
-  private readonly texts = new Map<string, string>()
-  private readonly media = new Set<string>()
-  private mediaListed = false
-  private notes = new Set<string>()
 
   constructor(
     private readonly doc: Y.Doc,
     private readonly project: Project,
     private readonly projectId: string,
-    readonly dir: FileSystemDirectoryHandle,
+    dir: FileSystemDirectoryHandle,
     /** The folder was opened on purpose, so it counts as this project even if it was saved under another id. */
     private readonly adopt: boolean,
-  ) {}
+    /** Where the project is in Weft, for project.json. */
+    private place: ProjectPlace | null,
+    /** For a project kept in the vault, whose folder follows it around. */
+    private readonly relocate: Relocate | null,
+  ) {
+    this.files = new ProjectFiles(dir, projectId)
+  }
+
+  get dir(): FileSystemDirectoryHandle {
+    return this.files.dir
+  }
 
   getState = (): MirrorState => this.state
 
@@ -79,22 +76,23 @@ export class VaultMirror {
   /** Starts mirroring if the browser still lets Weft use the folder; otherwise waits for `reconnect`. */
   async start(): Promise<void> {
     if (this.stopped) return
-    if ((await folderPermission(this.dir, false)) !== 'granted') {
+    if ((await folderPermission(this.files.dir, false)) !== 'granted') {
       this.set({ kind: 'needs-permission' })
       return
     }
     try {
-      const saved = await savedProjectId(this.dir)
+      const saved = await savedProjectId(this.files.dir)
       if (saved && saved !== this.projectId && !this.adopt) {
-        this.set({ kind: 'error', message: `“${this.dir.name}” holds a different project, so Weft won't write over it.` })
+        this.set({ kind: 'error', message: `“${this.files.dir.name}” holds a different project, so Weft won't write over it.` })
         return
       }
-      const synced = await fileIn(this.dir, SYNC_FILE)
-      if (synced) Y.applyUpdate(this.doc, new Uint8Array(await synced.arrayBuffer()), this)
+      this.conflicts = await withVaultLock(() => this.files.readInto(this.doc, this))
     } catch (error) {
       this.fail(error)
       return
     }
+    // While it's open here, this copy keeps its folder; the vault keeper leaves it alone.
+    if (this.relocate) keeper.claim(this.projectId)
     if (!this.listening) {
       this.doc.on('update', this.onUpdate)
       this.listening = true
@@ -104,7 +102,7 @@ export class VaultMirror {
 
   /** Asks the browser for the folder again. Must be called from a click. */
   async reconnect(): Promise<boolean> {
-    if ((await folderPermission(this.dir, true)) !== 'granted') return false
+    if ((await folderPermission(this.files.dir, true)) !== 'granted') return false
     await this.start()
     return true
   }
@@ -135,24 +133,32 @@ export class VaultMirror {
     return this.running
   }
 
+  private writeOnce(): Promise<void> {
+    return withVaultLock(async () => {
+      await this.files.write(this.doc, this.project, this.place, (detail) => this.set({ kind: 'saving', detail }), () => this.stopped)
+      if (this.conflicts.length) {
+        await this.files.tidy(this.conflicts)
+        this.conflicts = []
+      }
+    })
+  }
+
   private async write(): Promise<void> {
     this.firstPending = 0
     window.clearTimeout(this.timer)
     try {
       this.set({ kind: 'saving', detail: null })
-      const vector = Y.encodeStateVector(this.doc)
-      if (!this.lastVector || !same(vector, this.lastVector)) {
-        await writeFile(this.dir, SYNC_FILE, new Uint8Array(Y.encodeStateAsUpdate(this.doc)))
-        this.lastVector = vector
+      try {
+        await this.writeOnce()
+      } catch (error) {
+        if (!isMissing(error) || !this.relocate) throw error
+        // Its folder moved (renamed or moved in Weft, maybe in another tab): find it and save there.
+        const found = await this.relocate()
+        if (!found) throw new Error("This project isn't kept in the vault any more")
+        this.files = new ProjectFiles(found.dir, this.projectId)
+        this.place = found.place
+        await this.writeOnce()
       }
-      const s = this.project.snapshot()
-      const pages: NotesPage[] = Object.values(s.pages)
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .map((p) => ({ id: p.id, title: p.title || 'Untitled', markdown: notesToMarkdown(this.project.pageFragment(p.id)) }))
-      await this.text(this.dir, JSON_FILE, `${JSON.stringify(exportProject(s, { projectId: this.projectId, notes: pages }), null, 2)}\n`)
-      await this.text(this.dir, SCRIPT_FILE, scriptsMarkdown(s))
-      await this.writeNotes(pages)
-      await this.writeMedia(s)
       if (!this.stopped) this.set({ kind: 'saved', at: Date.now() })
     } catch (error) {
       this.fail(error)
@@ -165,62 +171,12 @@ export class VaultMirror {
     else this.set({ kind: 'error', message: error instanceof Error ? error.message : "Couldn't save to the folder" })
   }
 
-  /** Writes a text file only if it changed, so synced folders don't churn. */
-  private async text(dir: FileSystemDirectoryHandle, name: string, content: string, key = name): Promise<void> {
-    if (this.texts.get(key) === content) return
-    await writeFile(dir, name, content)
-    this.texts.set(key, content)
-  }
-
-  private async writeNotes(pages: readonly NotesPage[]): Promise<void> {
-    const folder = (await folderIn(this.dir, 'notes', true))!
-    const names = new Set<string>()
-    for (const page of pages) {
-      const base = safeFileName(page.title)
-      let name = `${base}.md`
-      for (let n = 2; names.has(name); n++) name = `${base} (${n}).md`
-      names.add(name)
-      await this.text(folder, name, page.markdown ? `${page.markdown}\n` : '', `notes/${name}`)
-    }
-    // Pages renamed or deleted while the project was open: take their old files away.
-    for (const old of this.notes) {
-      if (!names.has(old)) {
-        await removeFile(folder, old)
-        this.texts.delete(`notes/${old}`)
-      }
-    }
-    this.notes = names
-  }
-
-  private async writeMedia(s: ProjectSnapshot): Promise<void> {
-    const files = Object.values(s.assets).flatMap((a) => {
-      const name = a.kind !== 'link' && a.hash ? mediaFileName(a) : null
-      return name ? [{ hash: a.hash!, name }] : []
-    })
-    if (!files.length) return
-    const folder = (await folderIn(this.dir, 'media', true))!
-    if (!this.mediaListed) {
-      for (const name of await fileNames(folder)) this.media.add(name)
-      this.mediaListed = true
-    }
-    const missing = files.filter((f) => !this.media.has(f.name))
-    for (const [i, f] of missing.entries()) {
-      if (this.stopped) return
-      this.set({ kind: 'saving', detail: missing.length > 1 ? `Saving files (${i + 1} of ${missing.length})` : 'Saving a file' })
-      // From memory if it was just added here, otherwise the original from the server.
-      const res = await fetch(displayUrl(f.hash), { credentials: 'same-origin' })
-      // A file still on its way to the server is picked up by a later save.
-      if (!res.ok || !res.body) continue
-      await writeFile(folder, f.name, res.body)
-      this.media.add(f.name)
-    }
-  }
-
   stop(): void {
     this.stopped = true
     window.clearTimeout(this.timer)
     if (this.listening) this.doc.off('update', this.onUpdate)
     this.listening = false
+    keeper.release(this.projectId)
     this.set({ kind: 'stopped' })
   }
 }

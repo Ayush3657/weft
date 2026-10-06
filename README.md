@@ -39,13 +39,33 @@ The projects page has a sidebar of **spaces**: **Personal** (only you see it) an
 
 ## Keep a copy on this computer
 
-In Chrome or Edge, Weft can keep a copy of your projects in folders on your computer (these are folders on your disk, not the folders in a space):
+In Chrome or Edge, Weft keeps a copy of everything in a folder on your computer, the **vault**. Choose it from **Keep a copy on this computer…** at the bottom of the projects page's sidebar, and tick the spaces it keeps. It's laid out like Weft:
 
-- **A vault folder** (**Keep a copy on this computer…** at the bottom of the projects page's sidebar): every project you open gets a folder of its own there.
-- **A folder for one project**: use the folder button in the project's header.
-- **Open from folder** (projects page): opens a project folder from anywhere, for example one copied from another computer. It keeps its id, so it's the same project, and its pictures upload if the server doesn't have them. A project new to the server lands in the space and folder you're looking at.
+```
+Weft Vault/
+  ASBL Ads/                 a space
+    About.md                its library's notes
+    Library/                its pictures and clips, and library.json with their tags and captions
+    Broadway/               a folder, with its own About.md and Library/
+      Launch 30s/           a storyboard
+        project.sync        what Weft opens
+        project.json        a readable copy, including where it lives in Weft
+        script.md
+        notes/              one Markdown file per notes page
+        media/              the original pictures, clips and sound
+```
 
-Each project folder holds `project.sync` (what Weft opens), `project.json` (a readable copy), `script.md`, `notes/` and `media/` (the original pictures, clips and sound). Weft keeps it up to date while the project is open and merges in changes made elsewhere when you reopen it, so the folder can live in OneDrive or Dropbox. The browser asks once per visit before Weft can write to the folder again; installed as an app, it can remember.
+- Every storyboard in the ticked spaces is kept, not only the ones you open: soon after Weft opens in that browser, every ten minutes, and after you change something. A storyboard you have open is saved as you work.
+- Rename or move a folder or storyboard in Weft and its folder in the vault follows.
+- Nothing is deleted from the vault. A storyboard deleted in Weft stays there, under **In the vault, not in Weft**, and **Open in Weft** brings it back where it was.
+- **A folder for one storyboard** instead: use the folder button in its header.
+- **Open from folder** (projects page) opens a storyboard's folder from anywhere, for example one copied from another computer. It keeps its id, so it's the same storyboard, goes back to the space and folder it came from if they're still there (otherwise where you're looking), and its pictures upload if the server doesn't have them.
+- The vault is a copy for reading and backup: edit in Weft. Weft rewrites `project.json`, `script.md`, `notes/`, `About.md` and `Library/`.
+- The browser asks once per visit before Weft can write to the vault again (**Allow access**); installed as an app, it can remember.
+
+### A vault in OneDrive or Google Drive
+
+Choose a folder inside OneDrive, or inside Google Drive for desktop's drive (for example `G:\My Drive\Weft Vault`, not the drive itself), and the vault is backed up to the cloud like any other files. You can browse it on the web or your phone (plain folders, Markdown, pictures and clips), and on another computer with the same drive, **Open from folder** opens a storyboard from it. If two computers save the same storyboard at once, the drive keeps a second copy (OneDrive: `project-LAPTOP.sync`, Google Drive: `project (1).sync`); Weft merges it in the next time it saves that storyboard and removes it. For working together, share a space in Weft rather than a vault folder: the vault is each person's own copy.
 
 ## Use it with Claude
 

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { api, type FolderInfo, type ProjectSummary, type SpaceContents, type SpaceSummary } from '../lib/api'
+import { keeper } from '../vault/keeper'
 
 /**
  * Spaces and what's in them, kept from the last time they loaded so the
@@ -52,6 +53,8 @@ export async function refreshContents(spaceId: string): Promise<SpaceContents> {
 /** Reloads the list of spaces and what's in the given ones. */
 export async function reload(...spaceIds: string[]): Promise<void> {
   await Promise.all([refreshSpaces(), ...[...new Set(spaceIds)].map((id) => refreshContents(id).catch(() => contents.delete(id)))])
+  // Something moved, was renamed or was made: the vault follows.
+  keeper.soon()
 }
 
 // --------------------------------------------------------------- changes

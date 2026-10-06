@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { AuthProvider, useAuth } from './lib/auth'
 import { navigate, parseRoute, useLocation } from './lib/router'
 import { Toaster } from './lib/toast'
+import { keeper } from './vault/keeper'
 import { LoginPage } from './pages/LoginPage'
 import { ProjectPage } from './pages/ProjectPage'
 import { ProjectsPage } from './pages/ProjectsPage'
@@ -9,6 +11,10 @@ import { Button, FullScreenMessage, Spinner, TooltipProvider } from './ui'
 function Routes() {
   const { status, retry } = useAuth()
   const route = parseRoute(useLocation())
+  // Signed in: keep the vault up to date in the background.
+  useEffect(() => {
+    if (status === 'signed-in') keeper.start()
+  }, [status])
   if (status === 'loading') {
     return (
       <FullScreenMessage>
