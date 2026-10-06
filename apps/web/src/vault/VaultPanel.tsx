@@ -5,7 +5,7 @@ import { navigate, projectPath } from '../lib/router'
 import { toast, toastError } from '../lib/toast'
 import { Button } from '../ui'
 import { folderPermission, vaultSupported } from './fs'
-import { chooseVault, getVault, openFolder, pickAndOpenFolder, setVault, useVaultVersion, vaultOnlyProjects, type FolderProject } from './vault'
+import { chooseVault, getVault, openFolder, pickAndOpenFolder, setVault, useVaultVersion, vaultOnlyProjects, type FolderProject, type ImportPlace } from './vault'
 
 const cancelled = (error: unknown) => error instanceof DOMException && error.name === 'AbortError'
 
@@ -19,8 +19,8 @@ async function open(run: () => Promise<{ id: string; existed: boolean; title: st
   }
 }
 
-/** "Open from folder…", for the projects page header. */
-export function OpenFolderButton() {
+/** "Open from folder…", for the projects page header. A project new to this server lands in `place`. */
+export function OpenFolderButton({ place }: { place?: ImportPlace }) {
   const [busy, setBusy] = useState(false)
   if (!vaultSupported()) return null
   return (
@@ -29,7 +29,7 @@ export function OpenFolderButton() {
       busy={busy}
       onClick={() => {
         setBusy(true)
-        void open(pickAndOpenFolder).finally(() => setBusy(false))
+        void open(() => pickAndOpenFolder(place)).finally(() => setBusy(false))
       }}
     >
       Open from folder…
@@ -38,7 +38,7 @@ export function OpenFolderButton() {
 }
 
 /** The vault on the projects page: choose it, and open projects in it that this server doesn't have. */
-export function VaultPanel({ projects }: { projects: ProjectSummary[] | null }) {
+export function VaultPanel({ projects, place }: { projects: ProjectSummary[] | null; place?: ImportPlace }) {
   const version = useVaultVersion()
   const [vault, setVaultHandle] = useState<FileSystemDirectoryHandle | null | undefined>(undefined)
   const [permission, setPermission] = useState<PermissionState | null>(null)
@@ -79,7 +79,7 @@ export function VaultPanel({ projects }: { projects: ProjectSummary[] | null }) 
 
   if (!vault) {
     return (
-      <div className="mt-6 flex items-center gap-4 rounded-xl border border-line bg-panel px-4 py-3.5">
+      <div className="flex items-center gap-4 rounded-xl border border-line bg-panel px-4 py-3.5">
         <HardDrive size={18} className="shrink-0 text-fg-3" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="font-medium text-fg">Keep a copy of every project on this computer</p>
@@ -94,7 +94,7 @@ export function VaultPanel({ projects }: { projects: ProjectSummary[] | null }) 
   }
 
   return (
-    <div className="mt-6 rounded-xl border border-line bg-panel px-4 py-3">
+    <div className="rounded-xl border border-line bg-panel px-4 py-3">
       <div className="flex items-center gap-3">
         <HardDrive size={16} className="shrink-0 text-fg-3" aria-hidden />
         <p className="min-w-0 flex-1 truncate text-fg-2">
@@ -124,7 +124,7 @@ export function VaultPanel({ projects }: { projects: ProjectSummary[] | null }) 
                   busy={opening === p.dir.name}
                   onClick={() => {
                     setOpening(p.dir.name)
-                    void open(() => openFolder(p.dir)).finally(() => setOpening(null))
+                    void open(() => openFolder(p.dir, place)).finally(() => setOpening(null))
                   }}
                 >
                   {p.title}

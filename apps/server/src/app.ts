@@ -40,7 +40,30 @@ import { claudeExtension } from './extension'
 import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
 import { PREVIEW_SIZES, mediaPreview, warmPreviews, type PreviewSize } from './previews'
-import { ImportError, createProject, docName, getProject, importProject, listProjects, softDeleteProject } from './projects'
+import { addLibraryItem, deleteLibraryItem, libraryAt, libraryChain, libraryCounts, updateLibraryItem } from './library'
+import { ImportError, createProject, docName, importProject, listProjects, softDeleteProject, summaryOf } from './projects'
+import {
+  AccessError,
+  addMember,
+  cancelInvite,
+  claimInvites,
+  createFolder,
+  createSpace,
+  deleteFolder,
+  deleteSpace,
+  folderFor,
+  listFolders,
+  listMembers,
+  listSpaces,
+  moveProject,
+  placeFor,
+  projectFor,
+  removeMember,
+  setMemberRole,
+  spaceSummary,
+  updateFolder,
+  updateSpace,
+} from './spaces'
 import { hocuspocus } from './sync'
 import { UnfurlError, unfurl } from './unfurl'
 
@@ -52,6 +75,7 @@ app.onError((err, c) => {
   if (err instanceof UploadError) return c.json({ error: err.message }, err.status)
   if (err instanceof UnfurlError) return c.json({ error: err.message }, err.status)
   if (err instanceof ImportError) return c.json({ error: err.message }, 400)
+  if (err instanceof AccessError) return c.json({ error: err.message }, err.status)
   log.error(`${c.req.method} ${c.req.path} failed`, err)
   return c.json({ error: 'Something went wrong on the server' }, 500)
 })
@@ -101,6 +125,7 @@ app.post('/api/auth/dev', async (c) => {
   if (!input) return c.json({ error: 'Enter your name and a valid email' }, 400)
   if (!isEmailAllowed(input.email)) return c.json({ error: "That email isn't allowed on this server" }, 403)
   const user = upsertUser({ ...input, provider: 'dev' })
+  claimInvites(user.id, user.email)
   const { token, maxAge } = createSession(user.id)
   setCookie(c, SESSION_COOKIE, token, {
     httpOnly: true,
@@ -122,26 +147,209 @@ app.post('/api/auth/logout', (c) => {
 
 // -------------------------------------------------------------- projects
 
-app.get('/api/projects', requireUser, (c) => c.json({ projects: listProjects() }))
+app.get('/api/projects', requireUser, (c) => c.json({ projects: listProjects(currentUser(c).id) }))
+
+const Id = z.string().regex(/^[A-Za-z0-9]{6,32}$/)
 
 const CreateProjectBody = z.object({
   title: z.string().trim().min(1).max(200),
   type: z.enum(['ad', 'film', 'other']),
   aspect: z.enum(['16:9', '9:16', '1:1', '4:5', '2.39:1']).optional(),
   targetDuration: z.number().positive().max(36000).nullable().optional(),
+  spaceId: Id.optional(),
+  folderId: Id.nullable().optional(),
 })
 
 app.post('/api/projects', requireUser, async (c) => {
   const input = await body(c, CreateProjectBody)
   if (!input) return c.json({ error: 'Give the project a title and type' }, 400)
-  const project = createProject(currentUser(c).id, {
-    title: input.title,
-    type: input.type,
-    ...(input.aspect ? { aspect: input.aspect } : {}),
-    ...(input.targetDuration !== undefined ? { targetDuration: input.targetDuration } : {}),
-  })
-  log.info(`${currentUser(c).email} created project "${project.title}"`)
+  const user = currentUser(c)
+  const project = createProject(
+    user.id,
+    {
+      title: input.title,
+      type: input.type,
+      ...(input.aspect ? { aspect: input.aspect } : {}),
+      ...(input.targetDuration !== undefined ? { targetDuration: input.targetDuration } : {}),
+    },
+    placeFor(user.id, input.spaceId, input.folderId),
+  )
+  log.info(`${user.email} created project "${project.title}"`)
   return c.json({ project }, 201)
+})
+
+/** One project's summary, with where it lives (for the path above its title). */
+app.get('/api/projects/:id', requireUser, (c) => {
+  const user = currentUser(c)
+  const row = projectFor(c.req.param('id'), user.id)
+  const space = spaceSummary(row.space_id, user.id)
+  const folders = listFolders(row.space_id)
+  const path: Array<{ id: string; name: string }> = []
+  for (let id = row.folder_id; id; ) {
+    const folder = folders.find((f) => f.id === id)
+    if (!folder || path.some((p) => p.id === folder.id)) break
+    path.unshift({ id: folder.id, name: folder.name })
+    id = folder.parentId
+  }
+  return c.json({ project: summaryOf(row.id), space: { id: space.id, name: space.name, kind: space.kind }, path })
+})
+
+const MoveProjectBody = z.object({ spaceId: Id, folderId: Id.nullable() })
+
+/** Moves a project to another folder or space (you have to be in both). */
+app.patch('/api/projects/:id', requireUser, async (c) => {
+  const input = await body(c, MoveProjectBody)
+  if (!input) return c.json({ error: 'Say where to move it' }, 400)
+  moveProject(c.req.param('id'), currentUser(c).id, input)
+  return c.json({ project: summaryOf(c.req.param('id')) })
+})
+
+/** What a project can draw on: the libraries of its space and of each folder down to its own. */
+app.get('/api/projects/:id/library', requireUser, (c) => {
+  const user = currentUser(c)
+  return c.json({ levels: libraryChain(projectFor(c.req.param('id'), user.id), user.id) })
+})
+
+// ---------------------------------------------------------------- spaces
+
+app.get('/api/spaces', requireUser, (c) => c.json({ spaces: listSpaces(currentUser(c).id) }))
+
+const SpaceBody = z.object({ name: z.string().trim().min(1).max(80) })
+
+app.post('/api/spaces', requireUser, async (c) => {
+  const input = await body(c, SpaceBody)
+  if (!input) return c.json({ error: 'Give the space a name' }, 400)
+  const space = createSpace(currentUser(c).id, input.name)
+  log.info(`${currentUser(c).email} made the space "${space.name}"`)
+  return c.json({ space }, 201)
+})
+
+const SpacePatch = z.object({ name: z.string().trim().min(1).max(80).optional(), about: z.string().max(20_000).optional() })
+
+app.patch('/api/spaces/:id', requireUser, async (c) => {
+  const input = await body(c, SpacePatch)
+  if (!input) return c.json({ error: 'Nothing to change' }, 400)
+  return c.json({ space: updateSpace(c.req.param('id'), currentUser(c).id, input) })
+})
+
+app.delete('/api/spaces/:id', requireUser, (c) => {
+  deleteSpace(c.req.param('id'), currentUser(c).id)
+  return c.json({ ok: true })
+})
+
+/** Everything on a space's page: its folders, its projects, and how full each library is. */
+app.get('/api/spaces/:id/contents', requireUser, (c) => {
+  const user = currentUser(c)
+  const space = spaceSummary(c.req.param('id'), user.id)
+  return c.json({ space, folders: listFolders(space.id), projects: listProjects(user.id, space.id), libraryCounts: libraryCounts(space.id) })
+})
+
+app.get('/api/spaces/:id/members', requireUser, (c) => c.json(listMembers(c.req.param('id'), currentUser(c).id)))
+
+const MemberBody = z.object({ email: z.string().trim().min(3).max(200) })
+
+app.post('/api/spaces/:id/members', requireUser, async (c) => {
+  const input = await body(c, MemberBody)
+  if (!input) return c.json({ error: 'Enter an email address' }, 400)
+  const result = addMember(c.req.param('id'), currentUser(c).id, input.email)
+  return c.json({ ...result, ...listMembers(c.req.param('id'), currentUser(c).id) })
+})
+
+const RoleBody = z.object({ role: z.enum(['owner', 'member']) })
+
+app.patch('/api/spaces/:id/members/:userId', requireUser, async (c) => {
+  const input = await body(c, RoleBody)
+  if (!input) return c.json({ error: 'Choose owner or member' }, 400)
+  setMemberRole(c.req.param('id'), currentUser(c).id, c.req.param('userId'), input.role)
+  return c.json(listMembers(c.req.param('id'), currentUser(c).id))
+})
+
+app.delete('/api/spaces/:id/members/:userId', requireUser, (c) => {
+  const user = currentUser(c)
+  removeMember(c.req.param('id'), user.id, c.req.param('userId'))
+  return c.json(c.req.param('userId') === user.id ? { ok: true } : listMembers(c.req.param('id'), user.id))
+})
+
+app.delete('/api/spaces/:id/invites/:email', requireUser, (c) => {
+  cancelInvite(c.req.param('id'), currentUser(c).id, decodeURIComponent(c.req.param('email')))
+  return c.json(listMembers(c.req.param('id'), currentUser(c).id))
+})
+
+// --------------------------------------------------------------- folders
+
+const FolderBody = z.object({ spaceId: Id, parentId: Id.nullable().optional(), name: z.string().trim().min(1).max(80) })
+
+app.post('/api/folders', requireUser, async (c) => {
+  const input = await body(c, FolderBody)
+  if (!input) return c.json({ error: 'Give the folder a name' }, 400)
+  return c.json({ folder: createFolder(input.spaceId, currentUser(c).id, input.parentId ?? null, input.name) }, 201)
+})
+
+const FolderPatch = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  parentId: Id.nullable().optional(),
+  about: z.string().max(20_000).optional(),
+})
+
+app.patch('/api/folders/:id', requireUser, async (c) => {
+  const input = await body(c, FolderPatch)
+  if (!input) return c.json({ error: 'Nothing to change' }, 400)
+  return c.json({ folder: updateFolder(c.req.param('id'), currentUser(c).id, input) })
+})
+
+app.delete('/api/folders/:id', requireUser, (c) => {
+  deleteFolder(c.req.param('id'), currentUser(c).id)
+  return c.json({ ok: true })
+})
+
+// --------------------------------------------------------------- library
+
+/** One space's (no folder) or folder's library: its about text and items. */
+app.get('/api/library', requireUser, (c) => {
+  const user = currentUser(c)
+  const folderId = c.req.query('folder') || null
+  const spaceId = folderId ? folderFor(folderId, user.id).space_id : (c.req.query('space') ?? '')
+  return c.json(libraryAt(user.id, { spaceId, folderId }))
+})
+
+const LibraryItemBody = z.object({
+  spaceId: Id,
+  folderId: Id.nullable(),
+  hash: z.string().regex(HASH_PATTERN),
+  name: z.string().max(200),
+  mime: z.string().max(120),
+  width: z.number().int().positive().nullable().optional(),
+  height: z.number().int().positive().nullable().optional(),
+  duration: z.number().positive().nullable().optional(),
+  caption: z.string().max(2000).optional(),
+  tags: z.array(z.string().max(60)).max(40).optional(),
+})
+
+app.post('/api/library', requireUser, async (c) => {
+  const input = await body(c, LibraryItemBody)
+  if (!input) return c.json({ error: 'That file is missing something' }, 400)
+  const { spaceId, folderId, ...item } = input
+  return c.json({ item: addLibraryItem(currentUser(c).id, { spaceId, folderId }, item) }, 201)
+})
+
+const LibraryItemPatch = z.object({
+  name: z.string().max(200).optional(),
+  caption: z.string().max(2000).optional(),
+  tags: z.array(z.string().max(60)).max(40).optional(),
+  accept: z.array(z.string().max(60)).max(40).optional(),
+  reject: z.array(z.string().max(60)).max(40).optional(),
+  folderId: Id.nullable().optional(),
+})
+
+app.patch('/api/library/:id', requireUser, async (c) => {
+  const input = await body(c, LibraryItemPatch)
+  if (!input) return c.json({ error: 'Nothing to change' }, 400)
+  return c.json({ item: updateLibraryItem(c.req.param('id'), currentUser(c).id, input) })
+})
+
+app.delete('/api/library/:id', requireUser, (c) => {
+  deleteLibraryItem(c.req.param('id'), currentUser(c).id)
+  return c.json({ ok: true })
 })
 
 /** Opens a project folder's saved state on this server (the body is project.sync). */
@@ -150,14 +358,16 @@ app.post('/api/projects/import', requireUser, async (c) => {
   if (declared > 256 * 1024 * 1024) return c.json({ error: 'That project is too large to open' }, 413)
   const state = new Uint8Array(await c.req.arrayBuffer())
   if (!state.length) return c.json({ error: 'The project file was empty' }, 400)
-  const result = importProject(currentUser(c).id, state, c.req.query('id') ?? null)
+  const user = currentUser(c)
+  const result = importProject(user.id, state, c.req.query('id') ?? null, placeFor(user.id, c.req.query('space') || null, c.req.query('folder') || null))
   if (!result.existed) log.info(`${currentUser(c).email} opened "${result.project.title}" from a folder`)
   return c.json(result, result.existed ? 200 : 201)
 })
 
 app.delete('/api/projects/:id', requireUser, (c) => {
   const id = c.req.param('id')
-  if (!getProject(id) || !softDeleteProject(id)) return c.json({ error: 'Project not found' }, 404)
+  projectFor(id, currentUser(c).id)
+  if (!softDeleteProject(id)) return c.json({ error: 'Project not found' }, 404)
   hocuspocus.closeConnections(docName(id))
   log.info(`${currentUser(c).email} deleted project ${id}`)
   return c.json({ ok: true })
@@ -350,11 +560,15 @@ app.delete('/api/connect/local', requireUser, (c) => {
  * Which of Claude's change sets can still be undone. Undo lives in the
  * session's memory, so a server restart ends it.
  */
-app.get('/api/projects/:id/changes/live', requireUser, async (c) => c.json({ live: await liveChangeSets(c.req.param('id')) }))
+app.get('/api/projects/:id/changes/live', requireUser, async (c) => {
+  projectFor(c.req.param('id'), currentUser(c).id)
+  return c.json({ live: await liveChangeSets(c.req.param('id')) })
+})
 
 /** Undoes a change set Claude made, while its session is still running. */
 app.post('/api/projects/:id/changes/:changeId/undo', requireUser, async (c) => {
   const { id, changeId } = c.req.param()
+  projectFor(id, currentUser(c).id)
   const session = await sessionWithChangeSet(id, changeId)
   if (!session) {
     return c.json({ error: "These changes can't be undone from Weft any more, because Claude's session has ended. Ask Claude to change them back, or edit them by hand." }, 409)

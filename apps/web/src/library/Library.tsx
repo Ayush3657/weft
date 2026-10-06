@@ -2,6 +2,7 @@ import { assetUsage, formatDuration, notesUsage, type AssetKind, type AssetSnaps
 import { AudioLines, ExternalLink, Link2, Plus, Search, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ClipboardEvent, type DragEvent, type FormEvent } from 'react'
 import { revealOnBoard } from '../board/actions'
+import { FolderLibrary } from '../spaces/FolderLibrary'
 import { MediaFill } from '../board/Media'
 import { useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
@@ -9,6 +10,7 @@ import { isAssetDrag, startAssetDrag } from '../lib/dnd'
 import { addLink, singleUrl } from '../lib/links'
 import { importFiles, mediaFiles, mediaUrl, useUploading } from '../lib/media'
 import { navigate, projectPath, writePath } from '../lib/router'
+import { usePref } from '../lib/prefs'
 import { useProject, useSnapshot } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, Field, IconButton, Input, Modal, Segmented } from '../ui'
@@ -91,6 +93,8 @@ export function Library({ onClose }: { onClose: () => void }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [linkOpen, setLinkOpen] = useState(false)
   const [dropping, setDropping] = useState(false)
+  const [scope, setScope] = usePref('library-scope')
+  const fromFolders = scope === 'folders'
   const usage = assetUsage(s)
   const notes = useNotesUsage()
   const uploading = useUploading()
@@ -108,7 +112,7 @@ export function Library({ onClose }: { onClose: () => void }) {
   const picker = useFilePicker((files) => void importFiles(project, files, user.id), 'image/*,video/*,audio/*')
 
   const onDragOver = (e: DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files') || isAssetDrag(e.dataTransfer)) return
+    if (fromFolders || !e.dataTransfer.types.includes('Files') || isAssetDrag(e.dataTransfer)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     setDropping(true)
@@ -123,7 +127,7 @@ export function Library({ onClose }: { onClose: () => void }) {
 
   // Pasting while the Library has focus adds to the Library, not to the board or moodboard behind it.
   const onPaste = (e: ClipboardEvent) => {
-    if (e.target instanceof HTMLElement && e.target.closest('input, textarea')) return
+    if (fromFolders || (e.target instanceof HTMLElement && e.target.closest('input, textarea'))) return
     const files = mediaFiles(e.clipboardData)
     const url = files.length ? null : singleUrl(e.clipboardData.getData('text/plain'))
     if (!files.length && !url) return
@@ -145,78 +149,102 @@ export function Library({ onClose }: { onClose: () => void }) {
     >
       <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line pr-2 pl-4">
         <h2 className="font-medium text-fg">Library</h2>
-        <span className="ml-1 text-[12px] text-fg-3 tabular-nums">{all.length}</span>
+        {!fromFolders && <span className="ml-1 text-[12px] text-fg-3 tabular-nums">{all.length}</span>}
         <div className="ml-auto flex items-center gap-0.5">
-          <IconButton size="sm" label="Upload files" onClick={picker.open}>
-            <Upload size={15} />
-          </IconButton>
-          <IconButton size="sm" label="Add a link" onClick={() => setLinkOpen(true)}>
-            <Plus size={15} />
-          </IconButton>
+          {!fromFolders && (
+            <>
+              <IconButton size="sm" label="Upload files" onClick={picker.open}>
+                <Upload size={15} />
+              </IconButton>
+              <IconButton size="sm" label="Add a link" onClick={() => setLinkOpen(true)}>
+                <Plus size={15} />
+              </IconButton>
+            </>
+          )}
           <IconButton size="sm" label="Close the Library" tooltip="Close (L)" onClick={onClose}>
             <X size={15} />
           </IconButton>
         </div>
       </header>
 
-      <div className="flex shrink-0 flex-col gap-2 border-b border-line p-3">
-        <div className="relative">
-          <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-fg-3" aria-hidden />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" aria-label="Search the Library" className="h-7 pl-8 text-[12px]" />
-        </div>
-        <Segmented<Filter> label="Show" size="sm" options={FILTERS} value={filter} onChange={(v) => setFilter(v ?? 'all')} />
+      <div className="shrink-0 border-b border-line px-3 pt-3">
+        <Segmented<'here' | 'folders'>
+          label="Whose library"
+          size="sm"
+          options={[
+            { id: 'here', label: 'This storyboard', title: 'Everything added to this storyboard' },
+            { id: 'folders', label: 'Folders', title: 'Notes, pictures and clips kept in the folders this storyboard is in' },
+          ]}
+          value={fromFolders ? 'folders' : 'here'}
+          onChange={(v) => setScope(v === 'folders' ? 'folders' : null)}
+        />
+        <div className="h-3" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {shown.length ? (
-          <div className="grid grid-cols-2 gap-2">
-            {shown.map((asset) => {
-              const uses = usesOf(asset.id).length
-              const pending = !!asset.hash && uploading.has(asset.hash)
-              return (
-                <button
-                  key={asset.id}
-                  type="button"
-                  draggable
-                  onDragStart={(e) => startAssetDrag(e, [asset.id])}
-                  onClick={() => setSelectedId((id) => (id === asset.id ? null : asset.id))}
-                  aria-pressed={asset.id === selectedId}
-                  title={`${assetLabel(asset)}. Drag onto a frame, the moodboard, notes or the bible.`}
-                  className={cx(
-                    'flex cursor-grab flex-col overflow-hidden rounded-lg border bg-bg text-left active:cursor-grabbing',
-                    asset.id === selectedId ? 'border-accent ring-2 ring-accent-soft' : 'border-line hover:border-line-strong',
-                  )}
-                >
-                  <span className="block aspect-[4/3] w-full overflow-hidden bg-media">
-                    <AssetThumb asset={asset} />
-                  </span>
-                  <span className="block px-2 py-1.5">
-                    <span className="block truncate text-[12px] text-fg">{assetLabel(asset)}</span>
-                    <span className={cx('block text-[11px]', uses || pending ? 'text-fg-3' : 'text-warn')}>
-                      {pending ? 'Uploading…' : uses ? `Used ${uses === 1 ? 'once' : `${uses} times`}` : 'Unused'}
-                    </span>
-                  </span>
-                </button>
-              )
-            })}
+      {fromFolders ? (
+        <FolderLibrary />
+      ) : (
+        <>
+          <div className="flex shrink-0 flex-col gap-2 border-b border-line p-3">
+            <div className="relative">
+              <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-fg-3" aria-hidden />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" aria-label="Search the Library" className="h-7 pl-8 text-[12px]" />
+            </div>
+            <Segmented<Filter> label="Show" size="sm" options={FILTERS} value={filter} onChange={(v) => setFilter(v ?? 'all')} />
           </div>
-        ) : (
-          <div className="flex flex-col items-center gap-3 px-4 py-10 text-center text-fg-3">
-            <p>
-              {all.length
-                ? 'Nothing matches.'
-                : 'Everything you add anywhere in the project lands here. Drop or paste files on this panel to add them.'}
-            </p>
-            {!all.length && (
-              <Button size="sm" icon={<Upload size={14} />} onClick={picker.open}>
-                Upload files
-              </Button>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {shown.length ? (
+              <div className="grid grid-cols-2 gap-2">
+                {shown.map((asset) => {
+                  const uses = usesOf(asset.id).length
+                  const pending = !!asset.hash && uploading.has(asset.hash)
+                  return (
+                    <button
+                      key={asset.id}
+                      type="button"
+                      draggable
+                      onDragStart={(e) => startAssetDrag(e, [asset.id])}
+                      onClick={() => setSelectedId((id) => (id === asset.id ? null : asset.id))}
+                      aria-pressed={asset.id === selectedId}
+                      title={`${assetLabel(asset)}. Drag onto a frame, the moodboard, notes or the bible.`}
+                      className={cx(
+                        'flex cursor-grab flex-col overflow-hidden rounded-lg border bg-bg text-left active:cursor-grabbing',
+                        asset.id === selectedId ? 'border-accent ring-2 ring-accent-soft' : 'border-line hover:border-line-strong',
+                      )}
+                    >
+                      <span className="block aspect-[4/3] w-full overflow-hidden bg-media">
+                        <AssetThumb asset={asset} />
+                      </span>
+                      <span className="block px-2 py-1.5">
+                        <span className="block truncate text-[12px] text-fg">{assetLabel(asset)}</span>
+                        <span className={cx('block text-[11px]', uses || pending ? 'text-fg-3' : 'text-warn')}>
+                          {pending ? 'Uploading…' : uses ? `Used ${uses === 1 ? 'once' : `${uses} times`}` : 'Unused'}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 px-4 py-10 text-center text-fg-3">
+                <p>
+                  {all.length
+                    ? 'Nothing matches.'
+                    : 'Everything you add anywhere in the project lands here. Drop or paste files on this panel to add them.'}
+                </p>
+                {!all.length && (
+                  <Button size="sm" icon={<Upload size={14} />} onClick={picker.open}>
+                    Upload files
+                  </Button>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
-      {selected && <Details asset={selected} uses={usesOf(selected.id)} onClose={() => setSelectedId(null)} />}
+          {selected && <Details asset={selected} uses={usesOf(selected.id)} onClose={() => setSelectedId(null)} />}
+        </>
+      )}
       {picker.input}
       <AddLinkDialog open={linkOpen} onOpenChange={setLinkOpen} />
     </aside>

@@ -36,8 +36,16 @@ export interface WriteLocation {
   pageId: string | null
 }
 
+/** On the projects page: a space's top level or one of its folders, showing its storyboards or its library. */
+export interface ProjectsLocation {
+  /** Null: wherever you were last. */
+  spaceId: string | null
+  folderId: string | null
+  tab: 'storyboards' | 'library'
+}
+
 export type Route =
-  | { name: 'projects' }
+  | ({ name: 'projects' } & ProjectsLocation)
   | {
       name: 'project'
       projectId: string
@@ -52,9 +60,13 @@ export type Route =
 const PROJECT_PATH =
   /^\/p\/([A-Za-z0-9]{6,32})(?:\/(write|board|play)(?:\/(notes|script|bible|moodboard)(?:\/([A-Za-z0-9_-]{1,40}))?)?)?\/?$/
 
+const SPACE_PATH = /^\/s\/([A-Za-z0-9]{6,32})(?:\/f\/([A-Za-z0-9]{6,32}))?(\/library)?\/?$/
+
 export function parseRoute(url: string): Route {
   const [pathname = '', search = ''] = url.split('?')
-  if (pathname === '/' || pathname === '') return { name: 'projects' }
+  if (pathname === '/' || pathname === '') return { name: 'projects', spaceId: null, folderId: null, tab: 'storyboards' }
+  const space = SPACE_PATH.exec(pathname)
+  if (space) return { name: 'projects', spaceId: space[1]!, folderId: space[2] ?? null, tab: space[3] ? 'library' : 'storyboards' }
   const match = PROJECT_PATH.exec(pathname)
   if (!match) return { name: 'not-found' }
   const [, projectId, workspace, section, pageId] = match
@@ -73,3 +85,6 @@ export const projectPath = (projectId: string, workspace: Workspace = 'board') =
 export function writePath(projectId: string, { section, pageId }: WriteLocation): string {
   return `/p/${projectId}/write/${section}${section === 'notes' && pageId ? `/${pageId}` : ''}`
 }
+
+export const spacePath = (spaceId: string, folderId: string | null = null, tab: ProjectsLocation['tab'] = 'storyboards') =>
+  `/s/${spaceId}${folderId ? `/f/${folderId}` : ''}${tab === 'library' ? '/library' : ''}`

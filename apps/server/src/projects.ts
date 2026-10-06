@@ -1,6 +1,7 @@
 import { PROJECT_TYPES, initProject, newId, readMeta, type AspectRatio, type ProjectType } from '@weft/model'
 import * as Y from 'yjs'
 import { db, type ProjectRow } from './db'
+import { AccessError, canSeeProject, type Place } from './spaces'
 
 const DOC_PREFIX = 'project/'
 
@@ -19,6 +20,8 @@ export interface ProjectSummary {
   createdAt: number
   updatedAt: number
   createdBy: { id: string; name: string } | null
+  spaceId: string
+  folderId: string | null
 }
 
 const toSummary = (row: ProjectRow & { creator_name: string | null }): ProjectSummary => ({
@@ -28,16 +31,21 @@ const toSummary = (row: ProjectRow & { creator_name: string | null }): ProjectSu
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   createdBy: row.created_by ? { id: row.created_by, name: row.creator_name ?? '' } : null,
+  spaceId: row.space_id,
+  folderId: row.folder_id,
 })
 
-export function listProjects(): ProjectSummary[] {
+/** The projects this person can see (in the spaces they're in), newest first. One space's, if given. */
+export function listProjects(userId: string, spaceId?: string): ProjectSummary[] {
   const rows = db
     .prepare(
       `SELECT projects.*, users.name AS creator_name FROM projects
+       JOIN space_members m ON m.space_id = projects.space_id AND m.user_id = ?
        LEFT JOIN users ON users.id = projects.created_by
-       WHERE projects.deleted_at IS NULL ORDER BY projects.updated_at DESC`,
+       WHERE projects.deleted_at IS NULL ${spaceId ? 'AND projects.space_id = ?' : ''}
+       ORDER BY projects.updated_at DESC`,
     )
-    .all() as Array<ProjectRow & { creator_name: string | null }>
+    .all(...(spaceId ? [userId, spaceId] : [userId])) as Array<ProjectRow & { creator_name: string | null }>
   return rows.map(toSummary)
 }
 
@@ -52,8 +60,8 @@ export interface CreateProjectInput {
   targetDuration?: number | null
 }
 
-/** Creates a project and its initial document. Only the server ever initializes documents. */
-export function createProject(userId: string, input: CreateProjectInput): ProjectSummary {
+/** Creates a project and its initial document, in `place`. Only the server ever initializes documents. */
+export function createProject(userId: string, input: CreateProjectInput, place: Place): ProjectSummary {
   const id = newId()
   const doc = new Y.Doc()
   initProject(doc, {
@@ -67,19 +75,14 @@ export function createProject(userId: string, input: CreateProjectInput): Projec
   const now = Date.now()
   db.transaction(() => {
     db.prepare(
-      'INSERT INTO projects (id, title, type, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(id, input.title, input.type, userId, now, now)
+      'INSERT INTO projects (id, title, type, created_by, created_at, updated_at, space_id, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, input.title, input.type, userId, now, now, place.spaceId, place.folderId)
     db.prepare('INSERT INTO project_docs (project_id, state, updated_at) VALUES (?, ?, ?)').run(id, state, now)
   })()
-  const row = db
-    .prepare(
-      'SELECT projects.*, users.name AS creator_name FROM projects LEFT JOIN users ON users.id = projects.created_by WHERE projects.id = ?',
-    )
-    .get(id) as ProjectRow & { creator_name: string | null }
-  return toSummary(row)
+  return summaryOf(id)
 }
 
-function summaryOf(id: string): ProjectSummary {
+export function summaryOf(id: string): ProjectSummary {
   const row = db
     .prepare(
       'SELECT projects.*, users.name AS creator_name FROM projects LEFT JOIN users ON users.id = projects.created_by WHERE projects.id = ?',
@@ -96,10 +99,13 @@ export class ImportError extends Error {}
  * wherever it's opened. If this server already has it, nothing changes and the
  * app merges the folder's copy in instead.
  */
-export function importProject(userId: string, state: Uint8Array, wantedId: string | null): { project: ProjectSummary; existed: boolean } {
+export function importProject(userId: string, state: Uint8Array, wantedId: string | null, place: Place): { project: ProjectSummary; existed: boolean } {
   const validId = wantedId && /^[A-Za-z0-9]{6,32}$/.test(wantedId) ? wantedId : null
   const existing = validId ? getProject(validId) : null
-  if (existing && !existing.deleted_at) return { project: summaryOf(existing.id), existed: true }
+  if (existing && !existing.deleted_at) {
+    if (!canSeeProject(userId, existing)) throw new AccessError("This project is already on the server, in a space you're not in. Ask its owners to add you.", 403)
+    return { project: summaryOf(existing.id), existed: true }
+  }
 
   const doc = new Y.Doc()
   try {
@@ -116,13 +122,15 @@ export function importProject(userId: string, state: Uint8Array, wantedId: strin
   const type: ProjectType = (PROJECT_TYPES as readonly string[]).includes(meta.type) ? meta.type : 'other'
   const now = Date.now()
   db.transaction(() => {
-    db.prepare('INSERT INTO projects (id, title, type, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+    db.prepare('INSERT INTO projects (id, title, type, created_by, created_at, updated_at, space_id, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       id,
       meta.title || 'Untitled',
       type,
       userId,
       now,
       now,
+      place.spaceId,
+      place.folderId,
     )
     db.prepare('INSERT INTO project_docs (project_id, state, updated_at) VALUES (?, ?, ?)').run(id, Buffer.from(state), now)
   })()
