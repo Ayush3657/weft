@@ -91,7 +91,7 @@ const MEDIA_TYPES: Record<string, string> = {
   '.flac': 'audio/flac',
 }
 
-/** attach_media with a local path: upload the file from here, then hand the server its hash instead. */
+/** attach_media or add_to_library with a local path: upload the file from here, then hand the server its hash instead. */
 async function uploadLocalFile(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const given = String(args.path).trim().replace(/^["']|["']$/g, '')
   const full = path.resolve(given.startsWith('~') ? path.join(os.homedir(), given.slice(1)) : given)
@@ -179,7 +179,7 @@ async function forward(message: JSONRPCMessage): Promise<void> {
     if (request && CACHED.has(request.method)) pending.set(request.id, request.method as keyof Cache)
     if (request?.method === 'tools/call') {
       const params = request.params as { name?: string; arguments?: Record<string, unknown> } | undefined
-      if (params?.name === 'attach_media' && typeof params.arguments?.path === 'string') {
+      if ((params?.name === 'attach_media' || params?.name === 'add_to_library') && typeof params.arguments?.path === 'string') {
         message = { ...request, params: { ...params, arguments: await uploadLocalFile(params.arguments) } }
       }
     }

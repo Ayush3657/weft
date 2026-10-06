@@ -5,6 +5,7 @@ import { userFromAccessToken, userFromHeaders, type PublicUser } from './auth'
 import { isOriginAllowed } from './config'
 import { log } from './log'
 import { getProject, loadProjectState, projectIdFromDocName, saveProjectState } from './projects'
+import { canSeeProject } from './spaces'
 
 export interface SyncContext {
   user: PublicUser
@@ -37,8 +38,8 @@ export const hocuspocus = new Hocuspocus<SyncContext>({
     }
     if (!user) throw new Error('Not signed in')
 
-    const project = getProject(projectId)
-    if (!project || project.deleted_at) throw new Error('Project not found')
+    // Only people in the project's space can open it; to anyone else it doesn't exist.
+    if (!canSeeProject(user.id, getProject(projectId))) throw new Error('Project not found')
     return { user, projectId, via } satisfies SyncContext
   },
 

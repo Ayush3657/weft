@@ -30,7 +30,9 @@ import type { PublicUser } from '../auth'
 import { config } from '../config'
 import { getMedia, mediaFile, storeMediaBuffer } from '../media'
 import { warmPreviews } from '../previews'
+import { addLibraryItem, itemFor, libraryChain, libraryCounts, searchItems, suggestTags, type LibraryItem, type LibraryLevel } from '../library'
 import { createProject, listProjects, type ProjectSummary } from '../projects'
+import { listFolders, listSpaces, placeByPath, placeFor, placeName, projectFor, type Place } from '../spaces'
 import { downloadPublic, unfurl } from '../unfurl'
 import { describeCut, describeFrame, describeMoodboard, describeProject, resolveCut, resolveEntry, resolveFrame, resolvePage, searchProject } from './describe'
 import { contactSheet, imageSize, previewJpeg } from './images'
@@ -62,8 +64,8 @@ const labelsOf = (s: ProjectSnapshot, ids: readonly string[]) => {
   return ids.map((id) => labels.get(id) ?? id).join(', ')
 }
 
-function findProject(ref: string): ProjectSummary {
-  const all = listProjects()
+function findProject(ref: string, userId: string): ProjectSummary {
+  const all = listProjects(userId)
   const exact = all.find((p) => p.id === ref) ?? all.find((p) => norm(p.title) === norm(ref))
   if (exact) return exact
   const partial = all.filter((p) => norm(p.title).includes(norm(ref)))
@@ -74,6 +76,52 @@ function findProject(ref: string): ProjectSummary {
 
 const ids = <T extends { id: string }>(options: readonly T[]) => options.map((o) => o.id) as unknown as [T['id'], ...T['id'][]]
 const listed = (options: ReadonlyArray<{ id: string; label: string }>) => options.map((o) => `${o.id} (${o.label})`).join(', ')
+
+// --------------------------------------------------------------- libraries
+
+const KIND_LABEL = { image: 'picture', video: 'video', audio: 'sound' } as const
+
+function describeItem(item: LibraryItem): string {
+  return [
+    `[${KIND_LABEL[item.kind]}] "${item.name}" · id ${item.id}`,
+    item.tags.length ? `tags: ${item.tags.join(', ')}` : 'no tags yet',
+    item.width && item.height ? `${item.width}×${item.height}` : null,
+    item.duration ? formatSeconds(item.duration) : null,
+    item.caption ? `“${item.caption}”` : null,
+    item.suggestedTags.length ? `suggested tags waiting for a person: ${item.suggestedTags.join(', ')}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function describeLevel(level: LibraryLevel, isSpace: boolean, listed: number): string {
+  const out = [`## ${level.name} (${isSpace ? 'the space' : 'folder'})`]
+  out.push(level.about.trim() ? `Notes:\n${level.about.trim()}` : 'Notes: (none written yet)')
+  if (!level.items.length) {
+    out.push('Media: none yet')
+    return out.join('\n')
+  }
+  const counts = new Map<string, number>()
+  for (const item of level.items) for (const tag of item.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  const tags = [...counts].sort((a, b) => b[1] - a[1]).map(([tag, n]) => `${tag} (${n})`)
+  out.push(`Media: ${plural(level.items.length, 'item')}${tags.length ? `. Tags: ${tags.join(', ')}` : ''}`)
+  for (const item of level.items.slice(0, listed)) out.push(`- ${describeItem(item)}`)
+  if (level.items.length > listed) out.push(`- …and ${level.items.length - listed} more: find them with search_library.`)
+  return out.join('\n')
+}
+
+/** Where a project lives and what its libraries hold, for its overview. */
+function describePlace(projectId: string, userId: string): string {
+  const row = projectFor(projectId, userId)
+  const levels = libraryChain(row, userId)
+  const items = levels.reduce((n, level) => n + level.items.length, 0)
+  const notes = levels.filter((level) => level.about.trim()).map((level) => level.name)
+  return [
+    `Lives in: ${placeName({ spaceId: row.space_id, folderId: row.folder_id })}`,
+    `Libraries: ${plural(items, 'picture or clip').replace('picture or clips', 'pictures and clips')}${notes.length ? `, and notes in ${notes.join(', ')}` : ', and no notes yet'}. Read them with get_library before boarding.`,
+  ].join('\n')
+}
+
 
 // ---------------------------------------------------------------- schemas
 
@@ -237,7 +285,14 @@ Working well:
 - Keep each cut close to its target length; check the new length after changes.
 - For an alternative take on a shot, use add_variation rather than overwriting it, especially for approved frames.
 - Ask before deleting frames. Refer to frames by shot number or id.
-- Pictures come from people or from attach_media (for example a Blender render saved on this computer).`
+- Pictures come from people or from attach_media (for example a Blender render saved on this computer).
+
+Spaces, folders and libraries:
+- Projects (storyboards) live in spaces, someone's personal one or a team's, and in folders there. list_projects shows them.
+- A space and each folder can have a library: notes about what its storyboards are for (for a real-estate project: location, configurations, highlights, amenities, and lines every ad must include, like its RERA number) and tagged pictures and clips (renders, walkthroughs, drone shots).
+- A project draws on the libraries of its folder and of every folder above it, up to its space, and on nothing else.
+- Before boarding or writing, read get_library for the facts and must-say lines, and don't invent facts it doesn't give. Find renders with search_library, look at them with view_pictures (of: library), and use one with attach_media (library_item).
+- suggest_tags proposes tags for library items; people keep or drop them in Weft.`
 
 const NOT_CONNECTED =
   "Weft isn't connected to your account yet. In Weft, open your account menu, choose Connect Claude, then Connect Claude on this computer. Then try again; Claude doesn't need restarting."
@@ -255,7 +310,7 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
 
   const open = async (ref: string): Promise<{ session: AgentSession; s: ProjectSnapshot; id: string; title: string }> => {
     const user = me()
-    const summary = findProject(ref)
+    const summary = findProject(ref, user.id)
     const session = await sessionFor(summary.id, user)
     return { session, s: session.snapshot(), id: summary.id, title: summary.title }
   }
@@ -264,16 +319,38 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
 
   server.registerTool(
     'list_projects',
-    { title: 'List projects', description: 'All projects on this Weft server, newest first.', annotations: { readOnlyHint: true } },
+    {
+      title: 'List projects',
+      description: 'The spaces and folders you can see, with how much each library holds, and the projects (storyboards) in them, newest first.',
+      annotations: { readOnlyHint: true },
+    },
     guarded(async () => {
-      me()
-      const all = listProjects()
-      if (!all.length) return text('There are no projects yet. Make one with create_project.')
-      return text(
-        all
-          .map((p) => `"${p.title}" · id ${p.id} · ${p.type} · updated ${new Date(p.updatedAt).toISOString().slice(0, 16).replace('T', ' ')}`)
-          .join('\n'),
-      )
+      const user = me()
+      const all = listProjects(user.id)
+      const out = ['Spaces and folders. A path like "Team/Folder" works as `folder` in create_project and add_to_library.']
+      for (const space of listSpaces(user.id)) {
+        const folders = listFolders(space.id)
+        const counts = libraryCounts(space.id)
+        const here = (folderId: string | null) => {
+          const projects = all.filter((p) => p.spaceId === space.id && p.folderId === folderId).length
+          const items = counts[folderId ?? ''] ?? 0
+          return `${plural(projects, 'project')}${items ? ` · library: ${plural(items, 'item')}` : ''}`
+        }
+        const who = space.kind === 'personal' ? 'personal, just you' : `team of ${space.members} ${space.members === 1 ? 'person' : 'people'}`
+        out.push(`- ${space.name} (${who}) · at the top: ${here(null)}${space.about.trim() ? ' · has notes' : ''}`)
+        const walk = (parentId: string | null, depth: number) => {
+          for (const f of folders.filter((x) => x.parentId === parentId)) {
+            out.push(`${'  '.repeat(depth)}- ${f.name} · ${here(f.id)}${f.about.trim() ? ' · has notes' : ''}`)
+            walk(f.id, depth + 1)
+          }
+        }
+        walk(null, 1)
+      }
+      out.push('', all.length ? 'Projects, newest first:' : 'There are no projects yet. Make one with create_project.')
+      for (const p of all) {
+        out.push(`"${p.title}" · id ${p.id} · ${p.type} · in ${placeName(p)} · updated ${new Date(p.updatedAt).toISOString().slice(0, 16).replace('T', ' ')}`)
+      }
+      return text(out.join('\n'))
     }),
   )
 
@@ -287,7 +364,7 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
     },
     guarded(async ({ project }) => {
       const { session, s, id } = await open(project)
-      return text(describeProject(s, session.project, id))
+      return text(`${describeProject(s, session.project, id)}\n\n${describePlace(id, me().id)}`)
     }),
   )
 
@@ -426,17 +503,29 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
     'view_pictures',
     {
       title: 'Look at reference pictures',
-      description: "See the pictures attached to a frame's references, a bible entry, the brief's style references, or the moodboard.",
+      description: "See the pictures attached to a frame's references, a bible entry, the brief's style references, the moodboard, or items in the project's libraries.",
       inputSchema: {
         project: projectArg,
-        of: z.enum(['frame_references', 'bible_entry', 'style', 'moodboard']),
+        of: z.enum(['frame_references', 'bible_entry', 'style', 'moodboard', 'library']),
         frame: frameRef.optional(),
         entry: z.string().optional().describe('Bible entry name, for of = bible_entry.'),
+        items: z.array(z.string()).max(10).optional().describe('Library item ids (from get_library or search_library), for of = library.'),
       },
       annotations: { readOnlyHint: true },
     },
-    guarded(async ({ project, of, frame, entry }) => {
+    guarded(async ({ project, of, frame, entry, items }) => {
       const { s } = await open(project)
+      if (of === 'library') {
+        if (!items?.length) throw new AgentError('Say which library items to look at (ids from get_library or search_library)')
+        const content: Content[] = []
+        for (const ref of items) {
+          const item = itemFor(ref, me().id)
+          const jpeg = item.kind === 'image' ? await previewJpeg(item.hash, 768) : null
+          content.push({ type: 'text', text: describeItem(item) })
+          if (jpeg) content.push({ type: 'image', data: jpeg.toString('base64'), mimeType: 'image/jpeg' })
+        }
+        return { content }
+      }
       let assetIds: string[]
       if (of === 'frame_references') {
         if (!frame) throw new AgentError('Say which frame')
@@ -478,28 +567,84 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
     }),
   )
 
+  server.registerTool(
+    'get_library',
+    {
+      title: "A project's libraries",
+      description:
+        "What the project's space and folders know: notes (facts, highlights, lines every ad must include) and tagged pictures and clips, from the space down to the project's folder. Read it before boarding or writing.",
+      inputSchema: { project: projectArg },
+      annotations: { readOnlyHint: true },
+    },
+    guarded(async ({ project }) => {
+      const user = me()
+      const summary = findProject(project, user.id)
+      const levels = libraryChain(projectFor(summary.id, user.id), user.id)
+      const out = [`Libraries for "${summary.title}", from its space down to its folder:`]
+      levels.forEach((level, i) => out.push('', describeLevel(level, i === 0, 40)))
+      return text(out.join('\n'))
+    }),
+  )
+
+  server.registerTool(
+    'search_library',
+    {
+      title: 'Search libraries',
+      description: "Find pictures, clips and sound in the project's libraries by words (in names, captions and tags) and by tags.",
+      inputSchema: {
+        project: projectArg,
+        query: z.string().optional().describe('Words to look for, e.g. "clubhouse dusk".'),
+        tags: z.array(z.string()).optional().describe('Only items with all of these tags.'),
+        kind: z.enum(['image', 'video', 'audio']).optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    guarded(async ({ project, query, tags, kind }) => {
+      const user = me()
+      const summary = findProject(project, user.id)
+      const levels = libraryChain(projectFor(summary.id, user.id), user.id)
+      const found = levels.flatMap((level) => searchItems(level.items, query ?? '', tags ?? [], kind).map((item) => ({ level, item })))
+      if (!found.length) return text(`Nothing matches in the libraries of ${levels.map((l) => l.name).join(' › ')}.`)
+      const shown = found.slice(0, 40)
+      const more = found.length > shown.length ? [`…and ${found.length - shown.length} more. Narrow the search down.`] : []
+      return text([...shown.map(({ level, item }) => `${level.name}: ${describeItem(item)}`), ...more].join('\n'))
+    }),
+  )
+
+
   // --------------------------------------------------------------- writing
 
   server.registerTool(
     'create_project',
     {
       title: 'New project',
-      description: 'Makes a new project with one empty frame. For ads, set the target length in seconds.',
+      description:
+        "Makes a new project (a storyboard) with one empty frame, in a folder or space; by default in your personal space. For ads, set the target length in seconds.",
       inputSchema: {
         title: z.string().min(1).max(200),
         type: z.enum(['ad', 'film', 'other']),
         aspect: z.enum(ASPECT_RATIOS as unknown as [string, ...string[]]).optional().describe('Defaults to 16:9.'),
         target_seconds: z.number().positive().max(36000).optional(),
+        folder: z
+          .string()
+          .optional()
+          .describe('Where to put it: a path like "ASBL Ads/Broadway" (a space, then folders) or a folder id, from list_projects.'),
       },
     },
-    guarded(async ({ title, type, aspect, target_seconds }) => {
-      const project = createProject(me().id, {
-        title,
-        type,
-        ...(aspect ? { aspect: aspect as (typeof ASPECT_RATIOS)[number] } : {}),
-        ...(target_seconds ? { targetDuration: target_seconds } : {}),
-      })
-      return text(`Made "${project.title}" (id ${project.id}). It's open for everyone at ${config.appUrl}/p/${project.id}.`)
+    guarded(async ({ title, type, aspect, target_seconds, folder }) => {
+      const user = me()
+      const place = folder ? placeByPath(user.id, folder) : placeFor(user.id)
+      const project = createProject(
+        user.id,
+        {
+          title,
+          type,
+          ...(aspect ? { aspect: aspect as (typeof ASPECT_RATIOS)[number] } : {}),
+          ...(target_seconds ? { targetDuration: target_seconds } : {}),
+        },
+        place,
+      )
+      return text(`Made "${project.title}" (id ${project.id}) in ${placeName(place)}. Open it at ${config.appUrl}/p/${project.id}.`)
     }),
   )
 
@@ -855,7 +1000,7 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
     {
       title: 'Attach a picture or clip',
       description:
-        "Adds an image, video or audio file to a frame (as its picture or a reference), a bible entry, the brief's style references, or the moodboard. Give `path` for a file on this computer (for example a Blender render) or `url` for one on the web.",
+        "Adds an image, video or audio file to a frame (as its picture or a reference), a bible entry, the brief's style references, or the moodboard. Give `library_item` for something in the project's libraries, `path` for a file on this computer (for example a Blender render) or `url` for one on the web.",
       inputSchema: {
         project: projectArg,
         to: z.enum(['frame_picture', 'frame_reference', 'bible_entry', 'style', 'moodboard']),
@@ -863,11 +1008,12 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
         entry: z.string().optional().describe('Bible entry name, for to = bible_entry.'),
         path: z.string().optional().describe('Full path of a file on this computer.'),
         url: z.string().optional().describe('A public web address of the file.'),
+        library_item: z.string().optional().describe('A library item id (from get_library or search_library), to use that picture or clip.'),
         hash: z.string().optional().describe('Set by the Weft connector after it uploads `path`; leave it out.'),
         name: z.string().optional(),
       },
     },
-    guarded(async ({ project, to, frame, entry, path: filePath, url, hash, name }) => {
+    guarded(async ({ project, to, frame, entry, path: filePath, url, library_item, hash, name }) => {
       const { session, s } = await open(project)
       const frameId = to === 'frame_picture' || to === 'frame_reference' ? (frame ? resolveFrame(s, frame) : null) : null
       if ((to === 'frame_picture' || to === 'frame_reference') && !frameId) throw new AgentError('Say which frame')
@@ -878,7 +1024,13 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
       let mime: string
       let size: number
       let fileName = name ?? ''
-      if (hash) {
+      if (library_item) {
+        const item = itemFor(library_item, me().id)
+        const row = getMedia(item.hash)
+        if (!row) throw new AgentError("That library item's file is missing from the server.")
+        ;({ hash: fileHash, mime, size } = row)
+        fileName ||= item.name
+      } else if (hash) {
         const row = getMedia(hash)
         if (!row) throw new AgentError("The file didn't reach the server. Try again.")
         ;({ hash: fileHash, mime, size } = row)
@@ -894,7 +1046,7 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
           "This server can't read files from your computer. Connect Claude to Weft through the Weft connector (it uploads the file), or give a web address instead.",
         )
       } else {
-        throw new AgentError('Give a path or a url')
+        throw new AgentError('Give a library_item, a path or a url')
       }
 
       const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : 'audio'
@@ -944,6 +1096,92 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
       return text(`Attached ${fileName || 'the file'} (${kind}).`)
     }),
   )
+
+  server.registerTool(
+    'add_to_library',
+    {
+      title: 'Add to a library',
+      description:
+        "Adds a picture, clip or sound to a space's or folder's library, for every project in it to use (a render saved on this computer, say). Give `folder`, or `project` to use the folder that project is in. Tags you give arrive as suggestions for people to keep.",
+      inputSchema: {
+        folder: z.string().optional().describe('A path like "ASBL Ads/Broadway", or a folder id, from list_projects.'),
+        project: z.string().optional().describe('Or a project id or title: adds to the library of the folder it is in.'),
+        path: z.string().optional().describe('Full path of a file on this computer.'),
+        url: z.string().optional().describe('A public web address of the file.'),
+        hash: z.string().optional().describe('Set by the Weft connector after it uploads `path`; leave it out.'),
+        name: z.string().optional(),
+        caption: z.string().max(2000).optional().describe('What it shows, in a sentence.'),
+        tags: z.array(z.string()).max(20).optional(),
+      },
+    },
+    guarded(async ({ folder, project, path: filePath, url, hash, name, caption, tags }) => {
+      const user = me()
+      let place: Place
+      if (folder) place = placeByPath(user.id, folder)
+      else if (project) {
+        const row = projectFor(findProject(project, user.id).id, user.id)
+        place = { spaceId: row.space_id, folderId: row.folder_id }
+      } else throw new AgentError('Say which library: a folder path, or a project to use its folder')
+
+      let fileHash: string
+      let mime: string
+      let fileName = name ?? ''
+      if (hash) {
+        const row = getMedia(hash)
+        if (!row) throw new AgentError("The file didn't reach the server. Try again.")
+        ;({ hash: fileHash, mime } = row)
+      } else if (url) {
+        const file = await downloadPublic(url, config.maxUploadBytes)
+        if (!MEDIA_TYPES.test(file.contentType)) throw new AgentError(`That address isn't an image, video or audio file (it's ${file.contentType || 'unknown'})`)
+        const row = await storeMediaBuffer(new Uint8Array(file.data), file.contentType, user.id)
+        warmPreviews(row.hash)
+        ;({ hash: fileHash, mime } = row)
+        fileName ||= decodeURIComponent(file.url.pathname.split('/').pop() || '') || file.url.hostname
+      } else if (filePath) {
+        throw new AgentError("This server can't read files from your computer. Use the Weft connector (it uploads the file), or give a web address instead.")
+      } else {
+        throw new AgentError('Give a path or a url')
+      }
+      const stored = mediaFile(fileHash)
+      const dims = mime.startsWith('image/') && stored ? await imageSize(stored) : null
+      const item = addLibraryItem(user.id, place, {
+        hash: fileHash,
+        name: fileName || 'From Claude',
+        mime,
+        width: dims?.width ?? null,
+        height: dims?.height ?? null,
+        caption: caption ?? '',
+      })
+      const tagged = tags?.length ? suggestTags(item.id, user.id, tags) : item
+      return text(`Added to the library of ${placeName(place)}: ${describeItem(tagged)}`)
+    }),
+  )
+
+  server.registerTool(
+    'suggest_tags',
+    {
+      title: 'Suggest library tags',
+      description:
+        'Proposes tags for library items, after looking at them with view_pictures (of: library). They show in Weft as suggestions, and become tags when someone keeps them.',
+      inputSchema: {
+        items: z
+          .array(z.object({ item: z.string().describe('A library item id.'), tags: z.array(z.string()).min(1).max(20) }))
+          .min(1)
+          .max(50),
+      },
+    },
+    guarded(async ({ items }) => {
+      const user = me()
+      const done = items.map(({ item, tags }) => suggestTags(item, user.id, tags))
+      return text(
+        [
+          `Suggested tags for ${plural(done.length, 'item')}. They wait in Weft for someone to keep or drop them.`,
+          ...done.map((i) => `- "${i.name}": ${i.suggestedTags.join(', ') || 'nothing new (it has those tags already)'}`),
+        ].join('\n'),
+      )
+    }),
+  )
+
 
   server.registerTool(
     'add_note',

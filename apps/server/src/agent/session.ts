@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import type { PublicUser } from '../auth'
 import { log } from '../log'
 import { docName, getProject } from '../projects'
+import { canSeeProject } from '../spaces'
 import { hocuspocus } from '../sync'
 
 export const AGENT_NAME = 'Claude'
@@ -56,8 +57,7 @@ export class AgentSession {
   }
 
   static async open(projectId: string, user: PublicUser): Promise<AgentSession> {
-    const row = getProject(projectId)
-    if (!row || row.deleted_at) throw new AgentError(`Project ${projectId} doesn't exist`)
+    if (!canSeeProject(user.id, getProject(projectId))) throw new AgentError(`Project ${projectId} doesn't exist`)
     const connection = await hocuspocus.openDirectConnection(docName(projectId), { user, projectId, via: 'token' })
     return new AgentSession(projectId, user, connection)
   }
