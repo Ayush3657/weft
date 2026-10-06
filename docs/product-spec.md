@@ -28,7 +28,9 @@ Scale: from a 6-second bumper to a ~30-minute short film (20–40 scenes, 200–
 
 | Concept | What it is |
 |---|---|
-| Project | One ad or film. Has a type (ad, film, other), a format (aspect ratio, fps), and a storage mode |
+| Space | Where projects live: your personal space (only you) or a team's (its members). Holds folders, projects and libraries |
+| Folder | Nested inside a space, e.g. one per real-estate project, client or campaign |
+| Project | One ad or film (a storyboard). Has a type (ad, film, other), a format (aspect ratio, fps), and a storage mode. Lives in a space, maybe in a folder |
 | Frame | One shot. Media (image or video, with versions), references, sketch layer, description, audio lines, on-screen text, camera, duration, tags |
 | Link | A straight connection from one frame to the next, with a transition (type and duration) and an optional note |
 | Variation | An alternative frame at the same point in the story. Created at a fork; can merge back into the main path |
@@ -161,6 +163,8 @@ Start times, timecodes, and totals are always calculated per cut, never typed.
 - Opens as a side panel in every workspace, toggled with a shortcut. Drag assets onto frames, notes, or the moodboard.
 - Filter by type, tag, scene, or used/unused, and search. Each asset shows where it's used (frames, notes, moodboard, bible).
 
+**Spaces, folders and their libraries.** Projects live in spaces (yours, or a team's) and nested folders, browsed from a sidebar with search, sorting and drag-to-move. A space and each folder has a library of its own: notes (facts, highlights, the tone, lines every ad must include such as a RERA number) and tagged pictures, clips and sound (renders, walkthroughs, drone shots, floor plans, logos). A project draws on the libraries of its folder and every folder above it, and on nothing from anywhere else, so a film's work never mixes with the ads'. The project's Library panel shows them under Folders; drag from there onto frames. Claude reads the same libraries, searches them by tag, and suggests tags that people keep or drop.
+
 ## 10. Storage, sync, and the local vault
 
 **Sync engine.** Each project is a CRDT document (Yjs). Every copy is a live replica: the browser cache, the team server, the local vault, and Claude via MCP. Edits merge automatically, including after offline work. Media (images, video, audio) syncs separately by content hash, so big files never slow down typing.
@@ -191,6 +195,7 @@ Vault/
 
 **Security:**
 - Team sign-in with Google or Microsoft (Outlook) accounts, limited to allowed email addresses or domains. Project roles are enforced on the server.
+- Space membership is enforced on the server: only a space's members can list, open, sync, or let Claude touch what's in it. Owners add people by email (they join when they first sign in) and take them out.
 - Data encrypted at rest.
 - Local only mode for confidential work.
 - The vault doubles as your own backup, and snapshots let you restore.

@@ -1,12 +1,13 @@
 import { cutTimeline, formatSeconds } from '@weft/model'
-import { Check, ChevronDown, CloudOff, Copy, Library as LibraryIcon, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
-import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from 'react'
+import { Check, ChevronDown, ChevronRight, CloudOff, Copy, Library as LibraryIcon, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Fragment, Suspense, lazy, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Board } from '../board/Board'
 import { Library } from '../library/Library'
+import { api } from '../lib/api'
 import { cx } from '../lib/cx'
 import { useUploading } from '../lib/media'
 import { usePref } from '../lib/prefs'
-import { navigate, projectPath, type Workspace, type WriteLocation } from '../lib/router'
+import { navigate, projectPath, spacePath, type Workspace, type WriteLocation } from '../lib/router'
 import { useProject, useSnapshot, useSyncStatus, useUndoShortcuts } from '../project/hooks'
 import { ChangeBar } from '../project/ChangeBar'
 import { ProjectProvider } from '../project/ProjectProvider'
@@ -151,6 +152,7 @@ function ProjectShell({ projectId, workspace, write }: { projectId: string; work
   return (
     <div className="flex h-full flex-col">
       <AppHeader>
+        <PlaceCrumbs projectId={projectId} />
         <TitleField />
         <nav className="mx-auto flex items-center gap-0.5 rounded-lg bg-bg p-0.5" aria-label="Workspaces">
           {(['write', 'board', 'play'] as const).map((w) => (
@@ -200,6 +202,46 @@ function ProjectShell({ projectId, workspace, write }: { projectId: string; work
         {libraryOpen && <Library onClose={() => setLibraryPref(null)} />}
       </main>
     </div>
+  )
+}
+
+interface ProjectPlace {
+  space: { id: string; name: string }
+  path: Array<{ id: string; name: string }>
+}
+
+const places = new Map<string, ProjectPlace>()
+
+/** Where the storyboard lives ("ASBL Ads › Broadway"), each part a way back there. */
+function PlaceCrumbs({ projectId }: { projectId: string }) {
+  const [place, setPlace] = useState<ProjectPlace | null>(places.get(projectId) ?? null)
+  useEffect(() => {
+    let stale = false
+    api<ProjectPlace>(`/api/projects/${projectId}`).then(
+      (found) => {
+        places.set(projectId, found)
+        if (!stale) setPlace(found)
+      },
+      () => undefined,
+    )
+    return () => {
+      stale = true
+    }
+  }, [projectId])
+  if (!place) return null
+  const crumbs = [{ label: place.space.name, to: spacePath(place.space.id) }, ...place.path.map((f) => ({ label: f.name, to: spacePath(place.space.id, f.id) }))]
+  return (
+    <nav aria-label="Where this storyboard is" className="hidden min-w-0 shrink items-center text-[13px] text-fg-3 lg:flex">
+      {crumbs.map((c, i) => (
+        <Fragment key={c.to}>
+          {i > 0 && <ChevronRight size={13} className="shrink-0" aria-hidden />}
+          <button type="button" onClick={() => navigate(c.to)} className="max-w-[140px] truncate rounded px-1 py-0.5 hover:bg-hover hover:text-fg">
+            {c.label}
+          </button>
+        </Fragment>
+      ))}
+      <ChevronRight size={13} className="shrink-0" aria-hidden />
+    </nav>
   )
 }
 

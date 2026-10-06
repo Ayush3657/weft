@@ -37,6 +37,73 @@ export interface ProjectSummary {
   createdAt: number
   updatedAt: number
   createdBy: { id: string; name: string } | null
+  spaceId: string
+  folderId: string | null
+}
+
+export type Role = 'owner' | 'member'
+
+export interface SpaceSummary {
+  id: string
+  name: string
+  kind: 'personal' | 'team'
+  role: Role
+  about: string
+  members: number
+  projects: number
+}
+
+export interface FolderInfo {
+  id: string
+  spaceId: string
+  parentId: string | null
+  name: string
+  about: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SpaceContents {
+  space: SpaceSummary
+  folders: FolderInfo[]
+  projects: ProjectSummary[]
+  /** Library items per folder id ('' for the space's top level). */
+  libraryCounts: Record<string, number>
+}
+
+export interface MemberInfo {
+  id: string
+  name: string
+  email: string
+  role: Role
+}
+
+export interface LibraryItem {
+  id: string
+  spaceId: string
+  folderId: string | null
+  hash: string
+  kind: 'image' | 'video' | 'audio'
+  name: string
+  mime: string
+  size: number
+  width: number | null
+  height: number | null
+  duration: number | null
+  caption: string
+  tags: string[]
+  /** Claude's suggestions, waiting for someone to keep or drop them. */
+  suggestedTags: string[]
+  addedBy: { id: string; name: string } | null
+  addedAt: number
+}
+
+export interface LibraryLevel {
+  spaceId: string
+  folderId: string | null
+  name: string
+  about: string
+  items: LibraryItem[]
 }
 
 export interface AuthConfig {

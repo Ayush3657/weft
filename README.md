@@ -27,13 +27,23 @@ npm run app
 
 Then open http://localhost:8787. In Chrome or Edge you can install it as an app (the install icon in the address bar), which gives Weft its own window and taskbar icon.
 
-## Keep projects in a folder
+## Spaces, folders and libraries
 
-In Chrome or Edge, Weft can keep a copy of your projects in folders on your computer:
+The projects page has a sidebar of **spaces**: **Personal** (only you see it) and team spaces, which you share by adding people (their email; anyone who hasn't signed in yet joins when they do). Projects that existed before spaces were moved into a team space called **Team**, with everyone who had signed in; rename it from its menu.
 
-- **A vault folder** (on the projects page): every project you open gets a folder of its own there.
+- **Folders** nest inside a space, for example one folder per real-estate project with its storyboards inside. Make one with **New folder**, and drag storyboards or folders onto a folder (in the page, the sidebar or the path at the top) to move them, or use **Move to…** in a storyboard's menu to move it to another space.
+- **Search** (press `/`) finds storyboards and folders anywhere in the space; **sort** by last edited, name, newest or type.
+- Every space and folder has a **Library** tab: notes on what its storyboards are about (location, configurations, highlights, the lines every ad must include) and tagged renders, clips and sound. Drop or paste files there.
+- A storyboard can use the libraries of its folder and of every folder above it. In the storyboard, open the Library panel (`L`) and choose **Folders** to see them, then drag a picture onto a frame.
+- Claude reads the same libraries for a storyboard (and nothing outside them), finds pictures by tag, and can suggest tags; suggestions wait in the Library tab for someone to keep or drop.
+
+## Keep a copy on this computer
+
+In Chrome or Edge, Weft can keep a copy of your projects in folders on your computer (these are folders on your disk, not the folders in a space):
+
+- **A vault folder** (**Keep a copy on this computer…** at the bottom of the projects page's sidebar): every project you open gets a folder of its own there.
 - **A folder for one project**: use the folder button in the project's header.
-- **Open from folder** (projects page): opens a project folder from anywhere, for example one copied from another computer. It keeps its id, so it's the same project, and its pictures upload if the server doesn't have them.
+- **Open from folder** (projects page): opens a project folder from anywhere, for example one copied from another computer. It keeps its id, so it's the same project, and its pictures upload if the server doesn't have them. A project new to the server lands in the space and folder you're looking at.
 
 Each project folder holds `project.sync` (what Weft opens), `project.json` (a readable copy), `script.md`, `notes/` and `media/` (the original pictures, clips and sound). Weft keeps it up to date while the project is open and merges in changes made elsewhere when you reopen it, so the folder can live in OneDrive or Dropbox. The browser asks once per visit before Weft can write to the folder again; installed as an app, it can remember.
 

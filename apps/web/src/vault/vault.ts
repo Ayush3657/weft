@@ -150,11 +150,21 @@ export async function vaultOnlyProjects(vault: FileSystemDirectoryHandle, known:
  * clips the server is missing. The folder stays linked, so Weft keeps it up to
  * date. Returns the project id.
  */
-export async function openFolder(dir: FileSystemDirectoryHandle): Promise<{ id: string; existed: boolean; title: string }> {
+export interface ImportPlace {
+  spaceId: string
+  folderId: string | null
+}
+
+export async function openFolder(dir: FileSystemDirectoryHandle, place?: ImportPlace): Promise<{ id: string; existed: boolean; title: string }> {
   const found = await readFolder(dir)
   if (!found) throw new Error(`“${dir.name}” isn't a Weft project folder: there's no ${SYNC_FILE} in it. Pick the project's own folder.`)
   const state = new Uint8Array(await (await fileIn(dir, SYNC_FILE))!.arrayBuffer())
-  const res = await fetch(`/api/projects/import${found.projectId ? `?id=${encodeURIComponent(found.projectId)}` : ''}`, {
+  // A project new to this server goes where you are on the projects page.
+  const query = new URLSearchParams()
+  if (found.projectId) query.set('id', found.projectId)
+  if (place) query.set('space', place.spaceId)
+  if (place?.folderId) query.set('folder', place.folderId)
+  const res = await fetch(`/api/projects/import${query.size ? `?${query}` : ''}`, {
     method: 'POST',
     headers: { 'content-type': 'application/octet-stream' },
     body: state,
@@ -188,6 +198,6 @@ export async function openFolder(dir: FileSystemDirectoryHandle): Promise<{ id: 
 }
 
 /** Asks for a folder, then opens it as above. */
-export async function pickAndOpenFolder(): Promise<{ id: string; existed: boolean; title: string }> {
-  return openFolder(await pickFolder('weft-open'))
+export async function pickAndOpenFolder(place?: ImportPlace): Promise<{ id: string; existed: boolean; title: string }> {
+  return openFolder(await pickFolder('weft-open'), place)
 }

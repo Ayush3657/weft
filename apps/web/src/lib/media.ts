@@ -231,6 +231,28 @@ export async function uploadMedia(file: File): Promise<string> {
   return hash
 }
 
+export interface PreparedFile {
+  hash: string
+  kind: Exclude<AssetKind, 'link'>
+  name: string
+  meta: MediaMeta
+  /** Done when the server has the file. */
+  uploaded: Promise<void>
+}
+
+/**
+ * Gets a file ready for a space's or folder's library: shown from memory at
+ * once while it uploads, with its size and length read from it.
+ */
+export async function prepareFile(file: File): Promise<PreparedFile> {
+  const kind = fileKind(file.type)
+  if (!kind) throw new Error(`${file.name || 'That file'} isn't an image, video or audio file`)
+  const hash = await hashFile(file)
+  keepLocal(hash, file)
+  const meta = await probe(displayUrl(hash), kind)
+  return { hash, kind, name: assetName(file), meta, uploaded: upload(file, hash) }
+}
+
 /** Imports several files, reporting failures as toasts. Returns the asset ids that worked. */
 export async function importFiles(project: Project, files: Iterable<File>, userId: string): Promise<string[]> {
   const ids: string[] = []

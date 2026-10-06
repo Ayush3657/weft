@@ -32,7 +32,7 @@ function Routes() {
   if (status === 'signed-out') return <LoginPage />
   switch (route.name) {
     case 'projects':
-      return <ProjectsPage />
+      return <ProjectsPage location={route} />
     case 'project':
       return <ProjectPage projectId={route.projectId} workspace={route.workspace} write={route.write} popout={route.popout} />
     case 'not-found':
