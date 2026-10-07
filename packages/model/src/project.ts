@@ -5,6 +5,7 @@ import { byCreation } from './graph'
 import { newId, timestamp } from './ids'
 import { appendMarkdown } from './notes'
 import { DEFAULT_FRAME_SECONDS, buildSnapshot, num, readFrame, readLink, readMeta, str, type ProjectRoots, type YMap } from './read'
+import { cleanStroke, type StrokeInit } from './sketch'
 import { applyTextDiff } from './text'
 import { clampSeconds } from './timing'
 import type {
@@ -27,6 +28,7 @@ import type {
   ProjectType,
   SceneColor,
   ShotSize,
+  SketchStroke,
   TransitionType,
 } from './types'
 
@@ -355,6 +357,7 @@ export class Project implements ProjectRoots {
       m.set('tags', tags)
       if (init.tags?.length) tags.push([...init.tags])
       m.set('status', init.status ?? 'draft')
+      m.set('sketch', new Y.Array<SketchStroke>())
       return id
     })
   }
@@ -799,6 +802,43 @@ export class Project implements ProjectRoots {
       const arr = this.stringArray(frameId, 'tags')
       arr.delete(0, arr.length)
       arr.push([...new Set(tags)])
+    })
+  }
+
+  // ------------------------------------------------------------------ sketch
+
+  private sketchArray(frameId: string): Y.Array<SketchStroke> {
+    const m = this.requireFrame(frameId)
+    const existing = m.get('sketch')
+    if (existing instanceof Y.Array) return existing as Y.Array<SketchStroke>
+    const created = new Y.Array<SketchStroke>()
+    this.transact(() => m.set('sketch', created))
+    return created
+  }
+
+  /** Draws a stroke on a frame's sketch layer, on top of what's there. Returns its id. */
+  addStroke(frameId: string, stroke: StrokeInit): string {
+    return this.transact(() => {
+      const id = newId()
+      this.sketchArray(frameId).push([cleanStroke({ ...stroke, id, createdAt: timestamp() })])
+      return id
+    })
+  }
+
+  /** Takes strokes off a frame's sketch layer (the eraser). */
+  removeStrokes(frameId: string, strokeIds: readonly string[]): void {
+    if (!strokeIds.length) return
+    this.transact(() => {
+      const strokes = this.sketchArray(frameId)
+      const drop = new Set(strokeIds)
+      for (let i = strokes.length - 1; i >= 0; i--) if (drop.has(strokes.get(i).id)) strokes.delete(i, 1)
+    })
+  }
+
+  clearSketch(frameId: string): void {
+    this.transact(() => {
+      const strokes = this.sketchArray(frameId)
+      if (strokes.length) strokes.delete(0, strokes.length)
     })
   }
 

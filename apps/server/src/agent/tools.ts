@@ -35,7 +35,7 @@ import { createProject, listProjects, type ProjectSummary } from '../projects'
 import { listFolders, listSpaces, placeByPath, placeFor, placeName, projectFor, type Place } from '../spaces'
 import { downloadPublic, unfurl } from '../unfurl'
 import { describeCut, describeFrame, describeMoodboard, describeProject, resolveCut, resolveEntry, resolveFrame, resolvePage, searchProject } from './describe'
-import { contactSheet, imageSize, previewJpeg } from './images'
+import { contactSheet, framePicture, imageSize, previewJpeg } from './images'
 import { AgentError, sessionFor, type AgentSession } from './session'
 
 // ------------------------------------------------------------------ helpers
@@ -471,8 +471,16 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
       if (frames?.length) {
         for (const id of frames.map((ref) => resolveFrame(s, ref))) {
           const hash = heroHash(id)
-          const jpeg = hash ? await previewJpeg(hash, 1024) : null
-          content.push({ type: 'text', text: `${labels.get(id) ?? id}: ${jpeg ? 'picture below' : 'no still picture (none yet, or a video)'}. ${s.frames[id]!.description}` })
+          const sketch = s.frames[id]!.sketch
+          const jpeg = await framePicture(hash, sketch, aspectValue(s.meta.aspect), 1024)
+          const what = !jpeg
+            ? 'no still picture (none yet, or a video)'
+            : !sketch.length
+              ? 'picture below'
+              : hash
+                ? 'picture below, with its sketch drawn on it'
+                : 'its sketch below (no picture yet)'
+          content.push({ type: 'text', text: `${labels.get(id) ?? id}: ${what}. ${s.frames[id]!.description}` })
           if (jpeg) content.push({ type: 'image', data: jpeg.toString('base64'), mimeType: 'image/jpeg' })
         }
         return { content }
@@ -484,16 +492,17 @@ export function createAgentServer(caller: PublicUser | null, reason: string = NO
         hash: heroHash(item.frameId),
         label: labels.get(item.frameId) ?? '?',
         caption: s.frames[item.frameId]!.description,
+        sketch: s.frames[item.frameId]!.sketch,
       }))
       const aspect = aspectValue(s.meta.aspect)
       for (let i = 0; i < cells.length; i += 24) {
         const sheet = await contactSheet(cells.slice(i, i + 24), aspect)
         content.push({ type: 'image', data: sheet.toString('base64'), mimeType: 'image/jpeg' })
       }
-      const withPictures = cells.filter((c) => c.hash).length
+      const withPictures = cells.filter((c) => c.hash || c.sketch.length).length
       content.unshift({
         type: 'text',
-        text: `"${s.cuts[cutId]!.name}": ${plural(cells.length, 'frame')} left to right, top to bottom; ${withPictures} with pictures.`,
+        text: `"${s.cuts[cutId]!.name}": ${plural(cells.length, 'frame')} left to right, top to bottom; ${withPictures} with pictures or sketches (sketches are drawn over pictures, or on paper).`,
       })
       return { content }
     }),
@@ -1324,6 +1333,32 @@ ${script}`,
             text: `In the Weft project "${project}", write an image-generation prompt for each frame of ${cut ? `the cut "${cut}"` : 'the main cut'}.
 
 Read get_project (brief, tone, bible) and get_cut, and look at the style references and bible pictures with view_pictures. Each prompt should describe the shot (subject, action, framing from the shot size and angle, lens), consistent looks for recurring characters and places from the bible, lighting, and the project's style and aspect ratio. Write each into the frame's notes with update_frames, starting with "Image prompt:", keeping any notes already there.`,
+          },
+        },
+      ],
+    }),
+  )
+
+  server.registerPrompt(
+    'video_prompts',
+    {
+      title: 'Write video prompts',
+      description: 'Writes a video-generation prompt for each shot (for Google Flow, Higgsfield or another tool) from the pictures, sketches, camera, bible and library.',
+      argsSchema: {
+        project: z.string().describe('Project title or id'),
+        tool: z.string().optional().describe('Google Flow, Higgsfield, Kling, Runway… (default: Google Flow)'),
+        cut: z.string().optional().describe('Cut name (default: main)'),
+      },
+    },
+    ({ project, tool, cut }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `In the Weft project "${project}", write a video-generation prompt for ${tool || 'Google Flow (Veo)'} for each shot of ${cut ? `the cut "${cut}"` : 'the main cut'}.
+
+Read get_project (brief, tone, bible) and get_library (the folder's facts and must-say lines), get_cut for each shot's description, camera, length and dialogue, and look at the frames with view_frames (pictures and sketches: arrows show camera or subject moves, boxes show framings). For each shot, write what the camera does (shot size, angle, lens, move), who and what is in it with consistent looks from the bible, the action, the light and mood, and, for tools that make sound (Flow), the dialogue in quotes and the ambient sound, with no subtitles. Keep each within the shot's length. For Higgsfield, name the closest camera preset (Dolly In, Crane Up, Arc Right, Static…) and describe the action. Reply with the prompts numbered by shot, ready to paste; change nothing in the project unless asked.`,
           },
         },
       ],

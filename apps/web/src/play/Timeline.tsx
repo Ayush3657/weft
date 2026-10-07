@@ -1,5 +1,6 @@
 import {
   TRANSITIONS,
+  aspectValue,
   findOption,
   formatDuration,
   formatSeconds,
@@ -21,6 +22,7 @@ import {
 import { cx } from '../lib/cx'
 import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { displayUrl, mediaFiles } from '../lib/media'
+import { PAPER, SketchLayer } from '../sketch/SketchLayer'
 import { useProject } from '../project/hooks'
 import { Button, IconButton, Kbd } from '../ui'
 import type { PlaybackClock } from './clock'
@@ -438,11 +440,12 @@ function PictureClip({
       style={{ left: item.start * pps + 1, width }}
       title={`${label} · ${formatDuration(item.duration)}${frame?.description ? ` · ${frame.description}` : ''}`}
     >
-      {hero?.hash && hero.kind === 'image' && (
-        <img src={displayUrl(hero.hash, 320)} alt="" draggable={false} className="h-full w-[88px] shrink-0 object-cover" />
-      )}
-      {hero?.hash && hero.kind === 'video' && (
-        <video src={displayUrl(hero.hash)} muted preload="metadata" className="h-full w-[88px] shrink-0 object-cover" />
+      {(hero?.hash || !!frame?.sketch.length) && (
+        <div className="relative h-full w-[88px] shrink-0 overflow-hidden" style={hero?.hash ? undefined : { background: PAPER }}>
+          {hero?.hash && hero.kind === 'image' && <img src={displayUrl(hero.hash, 320)} alt="" draggable={false} className="size-full object-cover" />}
+          {hero?.hash && hero.kind === 'video' && <video src={displayUrl(hero.hash)} muted preload="metadata" className="size-full object-cover" />}
+          {frame && <SketchLayer strokes={frame.sketch} aspect={aspectValue(s.meta.aspect)} cover />}
+        </div>
       )}
       <div className="min-w-0 flex-1 px-1.5 py-1">
         <div className="flex items-center gap-1 text-[10.5px] font-semibold text-fg tabular-nums">

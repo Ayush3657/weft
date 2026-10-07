@@ -37,6 +37,27 @@ The projects page has a sidebar of **spaces**: **Personal** (only you see it) an
 - A storyboard can use the libraries of its folder and of every folder above it. In the storyboard, open the Library panel (`L`) and choose **Folders** to see them, then drag a picture onto a frame.
 - Claude reads the same libraries for a storyboard (and nothing outside them), finds pictures by tag, and can suggest tags; suggestions wait in the Library tab for someone to keep or drop.
 
+## Sketch on a frame
+
+Rough out a shot before there's a picture, or mark up the one there is: select a frame and press `D`, or use the pen button on its card (it shows when you point at the card) or **Sketch** in the inspector.
+
+- **Pen** (`P`), **arrow** (`A`; hold Shift for a straight one) for camera and subject moves, **box** (`B`) for framing, and **eraser** (`E`). Six colours and three sizes (`[` and `]`).
+- With a drawing tablet or a touch pen, lines follow your pressure.
+- `H` changes what's under the sketch: the picture, the picture faded, or plain paper. A frame without a picture is sketched on paper.
+- `←` and `→` go to the previous and next shot in the cut, and `Esc` closes. Each stroke is one undo (`Ctrl+Z`). **Clear** in the inspector removes a frame's sketch.
+- The sketch shows on the board, in the inspector, in Play (turn it off with **Sketches** under the player) and on thumbnails. Claude sees it when it looks at the frames, and the vault keeps each one as an SVG in the storyboard's `sketches/` folder.
+
+## Prompts for AI video
+
+Each frame already says what a video model needs (what we see, the camera, who's in it, the dialogue, the brief's tone), so Weft writes it up as a prompt to paste into the tool.
+
+- For one shot: **Video prompt** (the clapperboard) in the inspector, or right-click a frame. For the whole cut: the cut menu at the top, **Video prompts for this cut…**
+- Choose the tool. **Google Flow** gets Veo's order: the camera, the action, the cast, the move, the tone, then dialogue in quotes and the sound, with no subtitles. **Higgsfield** gets the camera-move preset to pick there (push in is Dolly In, orbit is Arc Right). **Other tools** (Kling, Runway, a model on your computer) get the length, the aspect and a negative prompt.
+- Tick what goes in: the brief's tone, dialogue, and voice-over (off at first, since it's usually recorded separately).
+- **Start frame** downloads the frame's picture, for image-to-video.
+- Edit a prompt before you copy it if you like. **Copy them all** copies every shot's prompt, numbered.
+- With Claude, use the **Write video prompts** prompt: Claude writes them from the frames, their pictures and sketches, and the library.
+
 ## Keep a copy on this computer
 
 In Chrome or Edge, Weft keeps a copy of everything in a folder on your computer, the **vault**. Choose it from **Keep a copy on this computer…** at the bottom of the projects page's sidebar, and tick the spaces it keeps. It's laid out like Weft:
@@ -53,6 +74,7 @@ Weft Vault/
         script.md
         notes/              one Markdown file per notes page
         media/              the original pictures, clips and sound
+        sketches/           each frame's sketch, as an SVG
 ```
 
 - Every storyboard in the ticked spaces is kept, not only the ones you open: soon after Weft opens in that browser, every ten minutes, and after you change something. A storyboard you have open is saved as you work.
@@ -69,7 +91,7 @@ Choose a folder inside OneDrive, or inside Google Drive for desktop's drive (for
 
 ## Use it with Claude
 
-Claude can read and edit your projects through MCP: board a script, rewrite VO to fit a length, make a cutdown, write image prompts, or attach a Blender render to a frame. Its edits show up live for everyone, grouped into change sets that you keep or undo from the bar in the app.
+Claude can read and edit your projects through MCP: board a script, rewrite VO to fit a length, make a cutdown, write image or video prompts, or attach a Blender render to a frame. It sees the frames' pictures and sketches. Its edits show up live for everyone, grouped into change sets that you keep or undo from the bar in the app.
 
 **On the computer Weft runs on:**
 

@@ -1,5 +1,5 @@
 import { cutTimeline, formatSeconds } from '@weft/model'
-import { Check, ChevronDown, ChevronRight, CloudOff, Copy, Library as LibraryIcon, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clapperboard, CloudOff, Copy, Library as LibraryIcon, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { Fragment, Suspense, lazy, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Board } from '../board/Board'
 import { Library } from '../library/Library'
@@ -11,6 +11,8 @@ import { navigate, projectPath, spacePath, type Workspace, type WriteLocation } 
 import { useProject, useSnapshot, useSyncStatus, useUndoShortcuts } from '../project/hooks'
 import { ChangeBar } from '../project/ChangeBar'
 import { ProjectProvider } from '../project/ProjectProvider'
+import { SketchEditorHost } from '../sketch/SketchEditor'
+import { VideoPromptsHost, openCutPrompts } from '../prompts/VideoPrompts'
 import { VaultButton } from '../vault/VaultButton'
 import { AppHeader, LogoMark } from '../shell/Shell'
 import { Button, Field, FullScreenMessage, IconButton, Input, Kbd, Menu, Modal, Spinner } from '../ui'
@@ -201,6 +203,8 @@ function ProjectShell({ projectId, workspace, write }: { projectId: string; work
         </div>
         {libraryOpen && <Library onClose={() => setLibraryPref(null)} />}
       </main>
+      <SketchEditorHost cutId={cutId} />
+      <VideoPromptsHost cutId={cutId} />
     </div>
   )
 }
@@ -317,6 +321,11 @@ function CutPicker({ cutId, onChange }: { cutId: string; onChange: (cutId: strin
               setName(`${current?.name ?? 'Cut'} copy`)
               setDialog('new')
             },
+          },
+          {
+            label: 'Video prompts for this cut…',
+            icon: <Clapperboard size={14} />,
+            onSelect: openCutPrompts,
           },
           {
             label: 'Rename cut',

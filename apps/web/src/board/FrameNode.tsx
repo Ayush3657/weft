@@ -1,12 +1,14 @@
 import { CAMERA_MOVES, SHOT_SIZES, findOption, formatDuration, type AssetKind, type FrameSnapshot } from '@weft/model'
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { ArrowLeftToLine, ArrowRightToLine, Check, Eye, EyeOff, GitBranchPlus, Plus, Trash2, Unlink } from 'lucide-react'
+import { ArrowLeftToLine, ArrowRightToLine, Check, Clapperboard, Eye, EyeOff, GitBranchPlus, PenLine, Plus, Trash2, Unlink } from 'lucide-react'
 import { memo, useEffect, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { cx } from '../lib/cx'
 import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { mediaFiles } from '../lib/media'
 import { BoundTextarea } from '../project/BoundText'
 import { useProjectContext } from '../project/ProjectProvider'
+import { openVideoPrompt } from '../prompts/VideoPrompts'
+import { PAPER, SketchLayer, openSketch } from '../sketch/SketchLayer'
 import { ContextMenuArea, type MenuItem } from '../ui'
 import { claimPendingFocus, useBoardActions } from './actions'
 import { EmptyMedia, MediaFill } from './Media'
@@ -89,6 +91,9 @@ export const FrameNode = memo(function FrameNode({ id, data, selected }: NodePro
     { label: 'Add frame before', icon: <ArrowLeftToLine size={14} />, onSelect: () => actions.insertBefore(id) },
     { label: 'Add variation', icon: <GitBranchPlus size={14} />, shortcut: 'Shift Enter', onSelect: () => actions.addVariation(id) },
     'separator',
+    { label: frame.sketch.length ? 'Sketch on it' : 'Sketch', icon: <PenLine size={14} />, shortcut: 'D', onSelect: () => openSketch(id) },
+    { label: 'Video prompt…', icon: <Clapperboard size={14} />, onSelect: () => openVideoPrompt(id) },
+    'separator',
     { label: 'Detach from sequence', icon: <Unlink size={14} />, disabled: !hasLinks, onSelect: () => actions.detach(id) },
     {
       label: hiddenInCut ? 'Show in this cut' : 'Hide in this cut',
@@ -116,7 +121,17 @@ export const FrameNode = memo(function FrameNode({ id, data, selected }: NodePro
         style={{ height: size.imageHeight }}
         {...fileDropProps('media')}
       >
-        {hero ? <MediaFill media={hero} /> : <EmptyMedia />}
+        {hero ? <MediaFill media={hero} /> : frame.sketch.length ? <div className="size-full" style={{ background: PAPER }} /> : <EmptyMedia />}
+        <SketchLayer strokes={frame.sketch} aspect={size.width / size.imageHeight} />
+        <button
+          type="button"
+          onClick={() => openSketch(id)}
+          title="Sketch on this frame (D)"
+          aria-label="Sketch on this frame"
+          className="nodrag absolute right-2 bottom-2 flex size-7 items-center justify-center rounded-md bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/80 focus-visible:opacity-100"
+        >
+          <PenLine size={14} />
+        </button>
         {hiddenInCut && (
           <span className="absolute top-2 left-2 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white">
             Hidden in this cut

@@ -127,6 +127,25 @@ export interface MediaVersion {
   label: string
 }
 
+export type SketchTool = 'pen' | 'arrow' | 'box'
+export const SKETCH_TOOLS: readonly SketchTool[] = ['pen', 'arrow', 'box']
+
+/** One stroke on a frame's sketch layer, in sketch units: the frame is 1000 wide. */
+export interface SketchStroke {
+  id: string
+  tool: SketchTool
+  /** A colour like "#e5484d". */
+  color: string
+  /** Its width, in sketch units. */
+  size: number
+  /** x, y pairs (x, y, pressure triples when drawn with a pen). A box is two corners. */
+  points: number[]
+  /** Every third number is a pen's pressure, 0 to 1. */
+  pressure: boolean
+  createdBy: string | null
+  createdAt: number
+}
+
 export interface FrameSnapshot {
   id: string
   createdAt: number
@@ -150,6 +169,8 @@ export interface FrameSnapshot {
   references: string[]
   tags: string[]
   status: FrameStatus
+  /** Drawn over the picture, or on a blank frame, in drawing order. */
+  sketch: SketchStroke[]
 }
 
 export interface LinkSnapshot {

@@ -155,7 +155,7 @@ Start times, timecodes, and totals are always calculated per cut, never typed.
 
 **Watch folders (v1.5, needs the desktop companion).** Watch a folder such as Blender's render output or Photoshop's exports. Files named after a shot (`3.2A.png`, `sc03_sh02.png`) attach to that frame as a new version automatically, and re-exporting updates the frame.
 
-**Sketch layer (v1, kept minimal).** Mouse drawing: pen, eraser, a few colors, and an arrow tool for camera and subject movement. You draw on a separate layer over the frame's media or on a blank frame; exports flatten the layer. Tablet pressure comes in v2.
+**Sketch layer (v1, kept minimal).** Drawing with a mouse or a pen, with pen pressure on tablets: a pen, arrows for camera and subject movement, boxes for framing, an eraser, six colors and three sizes. You draw on a separate layer over the frame's picture (full or faded) or on paper when there's no picture yet, and each stroke is one undo step. The sketch shows on board cards, in the inspector, in Play (with a toggle) and on thumbnails. Claude sees it with the picture. The vault keeps each sketch as an SVG, and exports flatten it over the picture.
 
 ## 9. Library
 
@@ -190,6 +190,7 @@ Vault/
         project.sync  sync state (don't edit)
         script.md, notes/
         media/        original images, videos, audio, with readable names
+        sketches/     each frame's sketch layer, as SVG
         exports/      PDFs, MP4s
         inbox/        drop files here to import (v1.5)
 ```
@@ -251,11 +252,19 @@ Two people can already edit the same project live in v1, because of the sync eng
 - `attach_media`: from a file path or URL
 - `add_note`
 
-**Ready-made prompts** in Claude's menu: "Board this script as a 30s ad", "Write image prompts for scene N", "Fit this cut to 15s".
+**Ready-made prompts** in Claude's menu: "Board this script as a 30s ad", "Write image prompts for scene N", "Write video prompts", "Fit this cut to 15s".
 
 **With the Blender MCP.** In the same chat, Claude can render a Blender camera view and attach it to a frame.
 
 In v1, MCP reaches Cloud and Both projects through the team server. Local-only projects need the desktop companion (v1.5).
+
+### v1: video prompts
+
+A frame already holds what a video model needs, so Weft writes the prompt for one frame or a whole cut, to copy into the tool:
+- **Google Flow (Veo):** camera, action, who's in the shot (from the bible), the camera move, the brief's tone, dialogue in quotes, the sound, and "no subtitles". Voice-over only when asked, since it's usually recorded separately.
+- **Higgsfield:** the same without the camera sentence, plus the camera-move preset to choose (push in → Dolly In, orbit → Arc Right).
+- **Other tools** (Kling, Runway, local models): adds the length, aspect and a negative prompt.
+- The frame's picture downloads as the start frame. Prompts can be edited before copying. Nothing is sent anywhere.
 
 ### v2: in-app AI (Claude API; optional local LLM)
 
@@ -274,7 +283,7 @@ In v1, MCP reaches Cloud and Both projects through the team server. Local-only p
 
 **Video.** MiniMax, through its cloud API.
 - Image-to-video, starting from the frame's hero image.
-- The prompt comes from the description and camera movement; the length comes from the frame's duration.
+- The prompt comes from the same builder as the v1 video prompts; the length comes from the frame's duration.
 - The clip becomes a new version of the frame, so the animatic turns into previz.
 
 **Voice.** Text-to-speech for scratch VO.
@@ -290,6 +299,7 @@ In v1, MCP reaches Cloud and Both projects through the team server. Local-only p
 | PDF storyboard: 1, 2, 3, or 6 frames per page, chosen fields, header with project name and version (no branding for now) | v1 |
 | Shot list (CSV) | v1 |
 | Project (JSON + media, same as the vault format) | v1 |
+| Video prompts for Google Flow, Higgsfield and other video tools, per shot or per cut | v1 |
 | Animatic MP4 | v1.5 |
 | Timeline XML/EDL for Premiere and Resolve | v2 |
 
@@ -299,12 +309,12 @@ In v1, MCP reaches Cloud and Both projects through the team server. Local-only p
 
 - Sync engine, team server, sign-in, browser cache, autosave, snapshots
 - Write: Notes, AV script, Bible, Moodboard, and the Library panel
-- Board: frames, links, variations, cuts (with overrides and hidden frames), scenes, auto-layout, numbering, sketch layer
+- Board: frames, links, variations, cuts (with overrides and hidden frames), scenes, auto-layout, numbering, sketch layer (with pen pressure)
 - Play: player, timeline, tracks, scratch VO, beat markers, on-screen text, transitions, camera moves
 - Import: paste, drag and drop, link previews, stills from video
 - Storage modes, with the vault written by the browser (Chrome/Edge)
 - Claude via a local MCP server
-- Export: PDF, shot list, project JSON
+- Export: PDF, shot list, project JSON, video prompts
 
 ### v1.5: film and pipeline
 
@@ -318,7 +328,6 @@ In v1, MCP reaches Cloud and Both projects through the team server. Local-only p
 - Roles, presence, comments, share links, follow mode, version compare
 - In-app AI actions
 - Image and video generation (Qwen Image, Flux, MiniMax), text-to-speech
-- Tablet pressure for the sketch layer
 - Automatic beat detection; XML/EDL export
 
 ### v3: public release
@@ -359,6 +368,6 @@ Remotion would speed up the player and export, but companies need a paid license
 | PDF branding | None for now |
 | Name | Weft (working name) |
 | UI design | Designed in code and reviewed in the browser; Figma later for the public launch |
-| Sketch layer | Mouse drawing in v1, tablet pressure in v2 |
+| Sketch layer | Mouse and pen drawing in v1, with pen pressure (moved up from v2 on 2026-10-07) |
 
 Hosting note: Google and Microsoft sign-in need an HTTPS address. Google won't redirect to a plain LAN IP address. While the server runs on the dev PC, teammates will reach it through a tunnel with an HTTPS domain, or use dev sign-in on the local network until we move to AWS.

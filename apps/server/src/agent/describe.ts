@@ -10,6 +10,7 @@ import {
   formatSeconds,
   graphOf,
   notesToMarkdown,
+  describeSketch,
   shotLabels,
   type BibleEntrySnapshot,
   type FrameSnapshot,
@@ -125,6 +126,7 @@ export function describeFrame(s: ProjectSnapshot, frameId: string, opts: { item?
     scene ? `Scene: ${scene.title || 'Untitled'}` : null,
     hero ? `Picture: ${s.assets[hero.assetId]?.kind ?? 'image'}${f.media.length > 1 ? ` (${f.media.length} versions)` : ''}` : 'No picture yet',
     f.references.length ? `${f.references.length} reference${f.references.length === 1 ? '' : 's'}` : null,
+    f.sketch.length ? `Sketch: ${describeSketch(f.sketch)} (view_frames shows it)` : null,
     f.status !== 'draft' ? `Status: ${f.status}` : null,
   ].filter(Boolean)
   lines.push(`  ${bits.join(' · ')}`)
