@@ -155,7 +155,7 @@ Start times, timecodes, and totals are always calculated per cut, never typed.
 
 **Watch folders (v1.5, needs the desktop companion).** Watch a folder such as Blender's render output or Photoshop's exports. Files named after a shot (`3.2A.png`, `sc03_sh02.png`) attach to that frame as a new version automatically, and re-exporting updates the frame.
 
-**Sketch layer (v1, kept minimal).** Drawing with a mouse or a pen, with pen pressure on tablets: a pen, arrows for camera and subject movement, boxes for framing, an eraser, six colors and three sizes. You draw on a separate layer over the frame's picture (full or faded) or on paper when there's no picture yet, and each stroke is one undo step. The sketch shows on board cards, in the inspector, in Play (with a toggle) and on thumbnails. Claude sees it with the picture. The vault keeps each sketch as an SVG, and exports flatten it over the picture.
+**Sketch layer (v1, kept minimal).** Drawing with a mouse or a pen, with pen pressure on tablets: a pen, arrows for camera and subject movement, boxes for framing, an eraser that rubs out just what it passes over (or whole strokes, with Shift), six colors and three sizes. Lines are smoothed as they're drawn. You draw on a separate layer over the frame's picture (full or faded) or on paper when there's no picture yet, and each stroke is one undo step. The sketch shows on board cards, in the inspector, in Play (with a toggle) and on thumbnails. Claude sees it with the picture. The vault keeps each sketch as an SVG, and exports flatten it over the picture.
 
 ## 9. Library
 

@@ -41,8 +41,8 @@ The projects page has a sidebar of **spaces**: **Personal** (only you see it) an
 
 Rough out a shot before there's a picture, or mark up the one there is: select a frame and press `D`, or use the pen button on its card (it shows when you point at the card) or **Sketch** in the inspector.
 
-- **Pen** (`P`), **arrow** (`A`; hold Shift for a straight one) for camera and subject moves, **box** (`B`) for framing, and **eraser** (`E`). Six colours and three sizes (`[` and `]`).
-- With a drawing tablet or a touch pen, lines follow your pressure.
+- **Pen** (`P`), **arrow** (`A`; hold Shift for a straight one) for camera and subject moves, **box** (`B`) for framing, and **eraser** (`E`), which rubs out just what it goes over (hold Shift to take whole strokes). Six colours and three sizes (`[` and `]`); the size sets the eraser's too.
+- Lines are smoothed as you draw, so a mouse's diagonals come out clean. With a drawing tablet or a touch pen, lines follow your pressure.
 - `H` changes what's under the sketch: the picture, the picture faded, or plain paper. A frame without a picture is sketched on paper.
 - `←` and `→` go to the previous and next shot in the cut, and `Esc` closes. Each stroke is one undo (`Ctrl+Z`). **Clear** in the inspector removes a frame's sketch.
 - The sketch shows on the board, in the inspector, in Play (turn it off with **Sketches** under the player) and on thumbnails. Claude sees it when it looks at the frames, and the vault keeps each one as an SVG in the storyboard's `sketches/` folder.

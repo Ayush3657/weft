@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
-import { Project, describeSketch, initProject, simplifyPoints, sketchSvg, strokeHit, strokeShapes, type SketchStroke } from '../src'
+import { Project, describeSketch, eraseStroke, initProject, simplifyPoints, sketchSvg, smoothDrawn, strokeHit, strokeShapes, type SketchStroke } from '../src'
 
 function setup() {
   const doc = new Y.Doc()
@@ -75,6 +75,93 @@ describe('the sketch layer', () => {
     expect(simplifyPoints(straight, 2)).toEqual([0, 0, 4, 0])
     const corner = [0, 0, 50, 0, 100, 0, 100, 50, 100, 100]
     expect(simplifyPoints(corner, 2)).toEqual([0, 0, 100, 0, 100, 100])
+  })
+
+  it('smooths the stair-steps out of a line drawn with a mouse', () => {
+    // A mouse reports whole pixels, so a shallow line arrives as a staircase. Here a pixel is 0.75 sketch units.
+    const px = 0.75
+    const points: number[] = []
+    for (let i = 0; i <= 400; i++) points.push(100 + i * px, 100 + Math.round(i * 0.3) * px)
+    const out = smoothDrawn(points, 2, px)
+    // The ends stay where they were drawn.
+    expect(out.slice(0, 2)).toEqual([100, 100])
+    expect(out.slice(-2)).toEqual(points.slice(-2))
+    // In between it runs within a fifth of a pixel of the straight line, on far fewer points.
+    let worst = 0
+    for (let i = 0; i < out.length; i += 2) worst = Math.max(worst, Math.abs(out[i + 1]! - (100 + (out[i]! - 100) * 0.3)))
+    expect(worst).toBeLessThan(0.2 * px)
+    expect(out.length).toBeLessThan(points.length / 10)
+  })
+
+  it('gives a mouse line the same width all along, like ink', () => {
+    const [shape] = strokeShapes(stroke({ points: [0, 100, 500, 100], size: 10 }))
+    const numbers = (shape!.d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number)
+    const across: number[] = []
+    for (let i = 0; i + 1 < numbers.length; i += 2) across.push(Math.abs(numbers[i + 1]! - 100))
+    // Ink at full swell is about 1.3 times the nib.
+    expect(Math.max(...across)).toBeGreaterThan(6.2)
+    expect(Math.max(...across)).toBeLessThan(6.6)
+    // Its long edges are straight, so the outline needs points only at the rounded ends.
+    expect((shape!.d.match(/Q/g) ?? []).length).toBeLessThan(80)
+    expect(shape!.d).toMatch(/Q[\d.]+,93\.6 [\d.]+,93\.6/)
+  })
+
+  it('rubs out just what the eraser goes over', () => {
+    const line = stroke({ id: 'a', points: [0, 100, 400, 100], size: 10 })
+    // Down across the middle: the eraser reaches 10, and the ink is 7 either side of its line.
+    const pieces = eraseStroke(line, [200, 50, 200, 150], 10)!
+    expect(pieces.map((s) => s.tool)).toEqual(['pen', 'pen'])
+    const [left, right] = pieces as [SketchStroke, SketchStroke]
+    const xs = (s: SketchStroke) => s.points.filter((_, i) => i % 3 === 0)
+    expect(Math.max(...xs(left))).toBeCloseTo(183, 5)
+    expect(Math.min(...xs(right))).toBeCloseTo(217, 5)
+    // The pieces keep the ink's swell: thin where the stroke began, full where it was cut.
+    expect(left.pressure).toBe(true)
+    expect(left.points[2]).toBeCloseTo(0.45, 2)
+    expect(left.points.at(-1)).toBeCloseTo(0.75, 2)
+    expect(right.points[2]).toBeCloseTo(0.75, 2)
+    expect(pieces.map((s) => s.id)).toEqual(['a.0', 'a.1'])
+    // Missed it: nothing changes. Went over all of it: nothing's left.
+    expect(eraseStroke(line, [200, 300, 250, 300], 10)).toBeNull()
+    expect(eraseStroke(line, [0, 100, 400, 100], 10)).toEqual([])
+  })
+
+  it('cuts boxes into lines that keep their corners, and arrows keep their heads', () => {
+    const box = stroke({ id: 'b', tool: 'box', points: [100, 100, 300, 200], size: 4 })
+    const tidy = (s: SketchStroke) => s.points.map((n) => Math.round(n * 10) / 10)
+    // Through the top edge: one line, from the cut round the other sides and back, each corner twice so it stays sharp.
+    const once = eraseStroke(box, [200, 80, 200, 120], 5)!
+    expect(once.map((s) => s.tool)).toEqual(['line'])
+    expect(tidy(once[0]!)).toEqual([207, 100, 300, 100, 300, 100, 300, 200, 300, 200, 100, 200, 100, 200, 100, 100, 100, 100, 193, 100])
+    // Through the top and the bottom: two lines.
+    expect(eraseStroke(box, [200, 80, 200, 220], 5)).toHaveLength(2)
+
+    const arrow = stroke({ id: 'r', tool: 'arrow', points: [0, 0, 400, 0], size: 5 })
+    // Across the shaft: the start becomes a line, the end keeps its head.
+    expect(eraseStroke(arrow, [200, -50, 200, 50], 8)!.map((s) => s.tool)).toEqual(['line', 'arrow'])
+    // Over the head: the head goes, and the rest is a line.
+    expect(eraseStroke(arrow, [395, -30, 395, 30], 8)!.map((s) => s.tool)).toEqual(['line'])
+    // Lines are drawn as lines.
+    expect(strokeShapes(once[0]!)[0]).toMatchObject({ fill: null, stroke: '#161616', width: 4 })
+  })
+
+  it('swaps an erased stroke for its pieces, in its place', () => {
+    const { p, frameId } = setup()
+    const init = { tool: 'pen' as const, color: '#161616', size: 10, pressure: false, createdBy: 'u1' }
+    const below = p.addStroke(frameId, { ...init, points: [0, 0, 50, 50] })
+    const target = p.addStroke(frameId, { ...init, points: [0, 100, 400, 100] })
+    const above = p.addStroke(frameId, { ...init, points: [0, 200, 50, 250] })
+    const before = p.snapshot().frames[frameId]!.sketch
+    const pieces = eraseStroke(before[1]!, [200, 50, 200, 150], 10)!
+    p.replaceStrokes(frameId, new Map([[target, pieces]]))
+    const after = p.snapshot().frames[frameId]!.sketch
+    expect(after).toHaveLength(4)
+    expect(after[0]!.id).toBe(below)
+    expect(after[3]!.id).toBe(above)
+    expect(after.slice(1, 3).every((s) => s.pressure && s.createdAt === before[1]!.createdAt && s.createdBy === 'u1')).toBe(true)
+    // Everything rubbed out: the stroke just goes.
+    p.replaceStrokes(frameId, new Map([[after[1]!.id, []]]))
+    expect(p.snapshot().frames[frameId]!.sketch).toHaveLength(3)
   })
 
   it('makes a standalone SVG, and says what a sketch holds', () => {

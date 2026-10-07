@@ -835,6 +835,24 @@ export class Project implements ProjectRoots {
     })
   }
 
+  /**
+   * Swaps strokes for what the eraser left of them (none, if it took them
+   * all), each in its stroke's place so what's on top stays on top.
+   */
+  replaceStrokes(frameId: string, pieces: ReadonlyMap<string, readonly StrokeInit[]>): void {
+    if (!pieces.size) return
+    this.transact(() => {
+      const strokes = this.sketchArray(frameId)
+      for (let i = strokes.length - 1; i >= 0; i--) {
+        const old = strokes.get(i)
+        const next = pieces.get(old.id)
+        if (!next) continue
+        strokes.delete(i, 1)
+        if (next.length) strokes.insert(i, next.map((piece) => cleanStroke({ ...piece, id: newId(), createdAt: old.createdAt })))
+      }
+    })
+  }
+
   clearSketch(frameId: string): void {
     this.transact(() => {
       const strokes = this.sketchArray(frameId)
