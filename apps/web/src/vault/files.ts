@@ -1,9 +1,14 @@
 import {
+  SKETCH_PAPER,
+  aspectValue,
   exportProject,
   mediaFileName,
   notesToMarkdown,
   safeFileName,
   scriptsMarkdown,
+  shotLabels,
+  sketchFileName,
+  sketchSvg,
   type AssetSnapshot,
   type NotesPage,
   type Project,
@@ -74,6 +79,7 @@ export class ProjectFiles {
   private readonly texts = new Map<string, string>()
   private media: Set<string> | null = null
   private notes: Set<string> | null = null
+  private sketches: Set<string> | null = null
   private lastVector: Uint8Array | null = null
 
   constructor(
@@ -132,7 +138,33 @@ export class ProjectFiles {
     await writeText(this.dir, JSON_FILE, `${JSON.stringify(exportProject(s, { projectId: this.projectId, notes: pages, place }), null, 2)}\n`, this.texts)
     await writeText(this.dir, SCRIPT_FILE, scriptsMarkdown(s), this.texts)
     await this.writeNotes(pages)
+    await this.writeSketches(s)
     await this.writeMedia(s, progress, stopped)
+  }
+
+  /** Each sketched frame as an SVG in sketches/ (on paper if it has no picture). sketches/ is Weft's too. */
+  private async writeSketches(s: ProjectSnapshot): Promise<void> {
+    const labels = shotLabels(s)
+    const aspect = aspectValue(s.meta.aspect)
+    const wanted = new Map<string, string>()
+    for (const f of Object.values(s.frames)) {
+      if (!f.sketch.length) continue
+      const name = sketchFileName(f.id, labels.get(f.id) ?? null).slice('sketches/'.length)
+      wanted.set(name, `${sketchSvg(f.sketch, aspect, { width: 1920, background: f.heroMediaId ? null : SKETCH_PAPER })}
+`)
+    }
+    const existing = await folderIn(this.dir, 'sketches', false)
+    if (!wanted.size && !existing) return
+    const folder = existing ?? (await folderIn(this.dir, 'sketches', true))!
+    this.sketches ??= new Set((await fileNames(folder)).filter((n) => n.toLowerCase().endsWith('.svg')))
+    for (const [name, svg] of wanted) await writeText(folder, name, svg, this.texts, `sketches/${name}`)
+    for (const old of this.sketches) {
+      if (wanted.has(old)) continue
+      await removeFile(folder, old)
+      this.texts.delete(`sketches/${old}`)
+    }
+    this.sketches = new Set(wanted.keys())
+    if (!wanted.size) await this.dir.removeEntry('sketches').catch(() => undefined)
   }
 
   /** One Markdown file per notes page. notes/ is Weft's: pages renamed or deleted take their files with them. */

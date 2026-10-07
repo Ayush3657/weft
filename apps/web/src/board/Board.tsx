@@ -39,6 +39,7 @@ import { useSnapshot, useUndoRedo } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, IconButton, Kbd } from '../ui'
 import { BoardActionsContext, focusFrameText, takeReveal, type BoardActions } from './actions'
+import { openSketch } from '../sketch/SketchLayer'
 import { FrameNode, type FrameNodeData, type FrameNodeType } from './FrameNode'
 import { Inspector } from './Inspector'
 import { stripLayout, type Point } from './layout'
@@ -643,6 +644,9 @@ function BoardView({ cutId }: { cutId: string }) {
         e.preventDefault()
         if (e.shiftKey) addVariation(only)
         else insertAfter(only)
+      } else if (e.key.toLowerCase() === 'd' && !e.shiftKey && only) {
+        e.preventDefault()
+        openSketch(only)
       } else if (e.key.toLowerCase() === 'k' && !e.shiftKey) {
         setKnifeMode((on) => !on)
       } else if (e.key === 'Escape') {

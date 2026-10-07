@@ -13,7 +13,7 @@ import { Stage, type Overlays } from './Stage'
 import { Timeline } from './Timeline'
 import { Transport, nextShot, previousShot } from './Transport'
 
-const DEFAULT_OVERLAYS: Overlays = { text: true, captions: false, safe: false, info: true }
+const DEFAULT_OVERLAYS: Overlays = { text: true, captions: false, safe: false, info: true, sketch: true }
 
 function useOverlays(): [Overlays, (key: keyof Overlays, value: boolean) => void] {
   const [raw, setRaw] = usePref('play-overlays')

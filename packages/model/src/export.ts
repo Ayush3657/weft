@@ -54,6 +54,9 @@ export function safeFileName(name: string, fallback = 'Untitled'): string {
   return /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(out) ? `${out}_` : out
 }
 
+/** A sketched frame's file in a project folder: by its shot number, or its id if it's not in a cut. */
+export const sketchFileName = (frameId: string, shot: string | null) => `sketches/${shot ? `Shot ${safeFileName(shot)}` : `Frame ${frameId}`}.svg`
+
 /** An asset's file name in a project folder: readable, plus the start of its hash so names never clash. */
 export function mediaFileName(asset: AssetSnapshot): string | null {
   if (!asset.hash) return null
@@ -150,6 +153,8 @@ export interface ProjectExport {
     scene: string | null
     status: string
     picture: string | null
+    /** The frame's sketch, as an SVG file in sketches/. */
+    sketch: string | null
     pictureVersions: string[]
     references: string[]
     notes: string
@@ -229,6 +234,7 @@ export function exportProject(
         scene: f.sceneId ? (s.scenes[f.sceneId]?.title ?? null) : null,
         status: f.status,
         picture: file(hero?.assetId),
+        sketch: f.sketch.length ? sketchFileName(f.id, labels.get(f.id) ?? null) : null,
         pictureVersions: files(f.media.map((m) => m.assetId)),
         references: files(f.references),
         notes: f.notes,

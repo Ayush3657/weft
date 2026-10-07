@@ -3,6 +3,7 @@ import {
   Captions,
   Info,
   Pause,
+  PenLine,
   Play,
   Repeat,
   ScanLine,
@@ -114,6 +115,9 @@ export function Transport({
         </IconButton>
         <IconButton label="Shot number" active={overlays.info} onClick={() => onOverlay('info', !overlays.info)}>
           <Info size={15} />
+        </IconButton>
+        <IconButton label="Sketches" active={overlays.sketch} onClick={() => onOverlay('sketch', !overlays.sketch)}>
+          <PenLine size={15} />
         </IconButton>
         <span className="mx-1 h-5 w-px bg-line" />
         <IconButton label={muted ? 'Sound is off' : 'Sound is on'} active={muted} onClick={() => onMuted(!muted)}>

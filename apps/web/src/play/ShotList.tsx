@@ -1,4 +1,5 @@
 import {
+  aspectValue,
   formatDuration,
   formatSeconds,
   indexAt,
@@ -13,6 +14,7 @@ import { memo, useCallback, useEffect, useRef } from 'react'
 import { cx } from '../lib/cx'
 import { displayUrl } from '../lib/media'
 import { BoundTextarea } from '../project/BoundText'
+import { PAPER, SketchLayer } from '../sketch/SketchLayer'
 import { useProject } from '../project/hooks'
 import { IconButton } from '../ui'
 import { useClockPlaying, useClockValue, type PlaybackClock } from './clock'
@@ -85,6 +87,7 @@ export function ShotList({
               start={item.start}
               duration={item.duration}
               label={labels.get(item.frameId) ?? '—'}
+              aspect={aspectValue(s.meta.aspect)}
               current={item.frameId === currentId}
               follow={playing && item.frameId === currentId}
               recorder={recorder}
@@ -108,6 +111,7 @@ const ShotRow = memo(function ShotRow({
   start,
   duration,
   label,
+  aspect,
   current,
   follow,
   recorder,
@@ -123,6 +127,7 @@ const ShotRow = memo(function ShotRow({
   start: number
   duration: number
   label: string
+  aspect: number
   current: boolean
   follow: boolean
   recorder: RecorderState
@@ -151,14 +156,18 @@ const ShotRow = memo(function ShotRow({
         hidden && 'opacity-55',
       )}
     >
-      <div className="mt-0.5 h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border border-line bg-media">
+      <div className="relative mt-0.5 h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border border-line bg-media">
         {hero?.hash && hero.kind === 'image' && <img src={displayUrl(hero.hash, 320)} alt="" className="size-full object-cover" draggable={false} />}
         {hero?.hash && hero.kind === 'video' && <video src={displayUrl(hero.hash)} muted preload="metadata" className="size-full object-cover" />}
-        {!hero?.hash && (
-          <div className="flex size-full items-center justify-center text-fg-3">
-            <Film size={16} aria-hidden />
-          </div>
-        )}
+        {!hero?.hash &&
+          (frame.sketch.length ? (
+            <div className="size-full" style={{ background: PAPER }} />
+          ) : (
+            <div className="flex size-full items-center justify-center text-fg-3">
+              <Film size={16} aria-hidden />
+            </div>
+          ))}
+        <SketchLayer strokes={frame.sketch} aspect={aspect} cover />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex h-6 items-center gap-1.5">

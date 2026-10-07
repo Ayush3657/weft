@@ -15,6 +15,7 @@ import {
   BIBLE_KINDS,
   CHANGE_STATUSES,
   MOOD_ITEM_KINDS,
+  SKETCH_TOOLS,
   type AssetSnapshot,
   type AudioLine,
   type BibleEntrySnapshot,
@@ -29,6 +30,7 @@ import {
   type ProjectMeta,
   type ProjectSnapshot,
   type SceneSnapshot,
+  type SketchStroke,
 } from './types'
 
 export type YMap = Y.Map<unknown>
@@ -127,6 +129,23 @@ function readMedia(v: unknown): MediaVersion[] {
   return out
 }
 
+/** Strokes as stored (kept as the same objects, so views can remember how to draw them). */
+function readSketch(v: unknown): SketchStroke[] {
+  if (!(v instanceof Y.Array)) return []
+  return v
+    .toArray()
+    .filter(
+      (x): x is SketchStroke =>
+        !!x &&
+        typeof x === 'object' &&
+        typeof x.id === 'string' &&
+        SKETCH_TOOLS.includes(x.tool) &&
+        typeof x.color === 'string' &&
+        typeof x.size === 'number' &&
+        Array.isArray(x.points),
+    )
+}
+
 export function readFrame(m: YMap): FrameSnapshot {
   const audio = m.get('audio')
   return {
@@ -154,6 +173,7 @@ export function readFrame(m: YMap): FrameSnapshot {
     references: strings(m.get('references')),
     tags: strings(m.get('tags')),
     status: oneOf(m.get('status'), FRAME_STATUSES, 'draft'),
+    sketch: readSketch(m.get('sketch')),
   }
 }
 

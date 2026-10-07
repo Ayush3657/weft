@@ -23,6 +23,7 @@ describe('project folders', () => {
     const p = new Project(doc)
     p.setText(firstFrameId, 'description', 'Aerial over the towers at dawn')
     p.setVo(firstFrameId, 'Some homes you buy.')
+    p.addStroke(firstFrameId, { tool: 'arrow', color: '#e5484d', size: 5, points: [100, 400, 600, 300], pressure: false, createdBy: null })
     const img = p.addAsset({ kind: 'image', hash: 'b'.repeat(64), name: 'aerial.png', mime: 'image/png' })
     p.addMediaVersion(firstFrameId, img)
     const priya = p.createBibleEntry('character', { name: 'Priya' })
@@ -35,7 +36,8 @@ describe('project folders', () => {
     expect(out.savedAt).toBeUndefined()
     expect(out.cuts[0]!.shots.map((s) => s.shot)).toEqual(['1', '2'])
     const first = out.frames.find((f) => f.id === firstFrameId)!
-    expect(first).toMatchObject({ picture: 'media/aerial-bbbbbbbbbb.png', inShot: ['Priya'], lengthFrom: 'voiceover' })
+    expect(first).toMatchObject({ picture: 'media/aerial-bbbbbbbbbb.png', sketch: 'sketches/Shot 1.svg', inShot: ['Priya'], lengthFrom: 'voiceover' })
+    expect(out.frames.find((f) => f.shot === '2')!.sketch).toBeNull()
     expect(first.audio[0]).toMatchObject({ kind: 'vo', text: 'Some homes you buy.' })
     expect(out.notes).toEqual([{ title: 'Notes', markdown: '# Ideas' }])
     expect(out.media).toEqual([expect.objectContaining({ file: 'media/aerial-bbbbbbbbbb.png', hash: 'b'.repeat(64) })])

@@ -1,3 +1,4 @@
+import { SKETCH_PAPER as PAPER, SKETCH_WIDTH, sketchElements, sketchHeight, sketchSvg, type SketchStroke } from '@weft/model'
 import sharp from 'sharp'
 import { mediaFile } from '../media'
 
@@ -68,8 +69,35 @@ function wrap(text: string, perLine: number, lines: number): string[] {
 export interface SheetCell {
   hash: string | null
   label: string
-  /** Shown instead of a picture when there isn't one. */
+  /** Shown instead of a picture when there isn't one (and there's no sketch). */
   caption: string
+  /** Drawn over the picture, or on paper. */
+  sketch?: readonly SketchStroke[]
+}
+
+/**
+ * A frame as it looks in Weft: its picture cropped to the frame's shape, with
+ * its sketch drawn on top (or the sketch on paper). Null when it has neither.
+ */
+export async function framePicture(hash: string | null, sketch: readonly SketchStroke[], aspect: number, max = 1024): Promise<Buffer | null> {
+  if (!sketch.length) return hash ? previewJpeg(hash, max) : null
+  const width = aspect >= 1 ? max : Math.round(max * aspect)
+  const height = Math.round(width / aspect)
+  const file = hash ? mediaFile(hash) : null
+  const picture = file
+    ? await sharp(file, { animated: false })
+        .rotate()
+        .resize(width, height, { fit: 'cover' })
+        .toBuffer()
+        .catch(() => null)
+    : null
+  const drawing = Buffer.from(sketchSvg(sketch, aspect, { width, height, background: picture ? null : PAPER }))
+  const base = picture ? sharp(picture) : sharp({ create: { width, height, channels: 3, background: PAPER } })
+  return base
+    .composite([{ input: drawing, top: 0, left: 0 }])
+    .flatten({ background: '#16161b' })
+    .jpeg({ quality: 82, mozjpeg: true })
+    .toBuffer()
 }
 
 /**
@@ -99,15 +127,19 @@ export async function contactSheet(cells: readonly SheetCell[], aspect: number):
           .toBuffer()
           .catch(() => null)
       }
+      const sketched = !!cell.sketch?.length
       const badgeW = 18 + cell.label.length * 11
-      const caption = picture
+      const caption = picture || sketched
         ? ''
         : wrap(cell.caption || 'No picture yet', Math.floor(cellW / 8.5), Math.max(1, Math.floor((cellH - 60) / 20)))
             .map((line, n) => `<text x="12" y="${62 + n * 20}" font-family="${font}" font-size="15" fill="#c9c9d2">${escapeXml(line)}</text>`)
             .join('')
+      // The sketch, over the picture or on paper, under the shot number.
+      const drawing = sketched ? sketchElements(cell.sketch!) : ''
       const overlay = Buffer.from(
         `<svg width="${cellW}" height="${cellH}" xmlns="http://www.w3.org/2000/svg">` +
-          (picture ? '' : `<rect width="${cellW}" height="${cellH}" fill="#26262e"/>`) +
+          (picture ? '' : `<rect width="${cellW}" height="${cellH}" fill="${sketched ? PAPER : '#26262e'}"/>`) +
+          (sketched ? `<svg width="${cellW}" height="${cellH}" viewBox="0 0 ${SKETCH_WIDTH} ${sketchHeight(aspect)}" preserveAspectRatio="none">${drawing}</svg>` : '') +
           `<rect x="8" y="8" width="${badgeW}" height="30" rx="6" fill="#8e7dff"/>` +
           `<text x="17" y="30" font-family="${font}" font-size="18" font-weight="700" fill="#ffffff">${escapeXml(cell.label)}</text>` +
           caption +

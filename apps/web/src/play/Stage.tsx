@@ -12,6 +12,7 @@ import {
 } from '@weft/model'
 import { memo, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { displayUrl } from '../lib/media'
+import { PAPER, SketchLayer } from '../sketch/SketchLayer'
 import { useClockTime, type PlaybackClock } from './clock'
 
 export interface Overlays {
@@ -19,6 +20,7 @@ export interface Overlays {
   captions: boolean
   safe: boolean
   info: boolean
+  sketch: boolean
 }
 
 /** Frames kept loaded ahead of the playhead, so each picture is ready before the cut to it. */
@@ -123,6 +125,8 @@ export function Stage({
               item={item}
               label={labels.get(frame.id) ?? ''}
               clock={clock}
+              aspect={aspect}
+              showSketch={overlays.sketch}
               onReady={onReady}
               onGone={onGone}
             />
@@ -172,6 +176,8 @@ const StageLayer = memo(function StageLayer({
   item,
   label,
   clock,
+  aspect,
+  showSketch,
   onReady,
   onGone,
 }: {
@@ -182,6 +188,8 @@ const StageLayer = memo(function StageLayer({
   item: PlayItem
   label: string
   clock: PlaybackClock
+  aspect: number
+  showSketch: boolean
   onReady: Ready
   onGone: (frameId: string) => void
 }) {
@@ -200,6 +208,7 @@ const StageLayer = memo(function StageLayer({
   const motion = cameraMotion(frame.movement, layer?.progress ?? 0)
   const transform = `translate(${motion.x * 100}%, ${motion.y * 100}%) scale(${motion.scale}) rotate(${motion.rotate}deg)`
   const usable = key !== null && failed !== key
+  const sketched = showSketch && frame.sketch.length > 0
   return (
     <div
       className="absolute inset-0"
@@ -216,7 +225,13 @@ const StageLayer = memo(function StageLayer({
       {usable && hero?.kind === 'video' && hero.hash && (
         <StageVideo frameId={frame.id} readyKey={key} hash={hero.hash} item={item} clock={clock} onReady={onReady} onFail={onFail} />
       )}
-      {!usable && <Slate label={label} frame={frame} />}
+      {!usable && (sketched ? <div className="absolute inset-0" style={{ background: PAPER }} /> : <Slate label={label} frame={frame} />)}
+      {sketched && (
+        // The sketch moves with a still picture (or the paper) as the camera move plays.
+        <div className="absolute inset-0" style={{ transform: usable && hero?.kind === 'video' ? undefined : transform }}>
+          <SketchLayer strokes={frame.sketch} aspect={aspect} />
+        </div>
+      )}
     </div>
   )
 })

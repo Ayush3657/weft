@@ -3,9 +3,11 @@ import {
   CAMERA_MOVES,
   SHOT_SIZES,
   TRANSITIONS,
+  aspectValue,
   baseDuration,
   countWords,
   cutTimeline,
+  describeSketch,
   formatDuration,
   formatSeconds,
   graphOf,
@@ -21,7 +23,7 @@ import {
   type ShotSize,
   type TransitionType,
 } from '@weft/model'
-import { ArrowRight, BookOpen, GitBranchPlus, ImagePlus, Plus, Trash2, Unlink, X } from 'lucide-react'
+import { ArrowRight, BookOpen, Clapperboard, GitBranchPlus, ImagePlus, PenLine, Plus, Trash2, Unlink, X } from 'lucide-react'
 import type { DragEvent, ReactNode } from 'react'
 import { attachToFrame } from '../lib/attach'
 import { useUser } from '../lib/auth'
@@ -30,6 +32,8 @@ import { droppedAssetIds, isMediaDrag } from '../lib/dnd'
 import { importFiles, mediaFiles } from '../lib/media'
 import { navigate, writePath } from '../lib/router'
 import { BoundTextarea } from '../project/BoundText'
+import { openVideoPrompt } from '../prompts/VideoPrompts'
+import { PAPER, SketchLayer, openSketch } from '../sketch/SketchLayer'
 import { useProject, useSnapshot } from '../project/hooks'
 import { useProjectContext } from '../project/ProjectProvider'
 import { Button, Field, IconButton, Kbd, Menu, Segmented, Select, textareaClass } from '../ui'
@@ -138,6 +142,9 @@ function FrameInspector({
       <Header
         actions={
           <>
+            <IconButton size="sm" label="Video prompt" tooltip="Video prompt: for Google Flow, Higgsfield and others" onClick={() => openVideoPrompt(frameId)}>
+              <Clapperboard size={15} />
+            </IconButton>
             <IconButton
               size="sm"
               label="Add a variation"
@@ -170,24 +177,40 @@ function FrameInspector({
         <Section
           title="Frame image"
           action={
-            <Button size="sm" variant="ghost" icon={<ImagePlus size={14} />} onClick={mediaPicker.open}>
-              {frame.media.length ? 'New version' : 'Add'}
-            </Button>
+            <div className="flex gap-0.5">
+              <Button size="sm" variant="ghost" icon={<PenLine size={14} />} onClick={() => openSketch(frameId)} title="Sketch on this frame (D)">
+                Sketch
+              </Button>
+              <Button size="sm" variant="ghost" icon={<ImagePlus size={14} />} onClick={mediaPicker.open}>
+                {frame.media.length ? 'New version' : 'Add'}
+              </Button>
+            </div>
           }
         >
           <div
-            className="overflow-hidden rounded-lg border border-line bg-media"
+            className="relative overflow-hidden rounded-lg border border-line bg-media"
             style={{ aspectRatio: s.meta.aspect.replace(':', ' / ') }}
             {...dropZone('media')}
           >
             {heroAsset ? (
-              <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind, title: heroAsset.name }} controls size={1280} />
+              <MediaFill media={{ hash: heroAsset.hash, kind: heroAsset.kind, title: heroAsset.name }} controls={!frame.sketch.length} size={1280} />
+            ) : frame.sketch.length ? (
+              <button type="button" onClick={() => openSketch(frameId)} className="size-full" style={{ background: PAPER }} aria-label="Sketch on this frame" />
             ) : (
               <button type="button" onClick={mediaPicker.open} className="size-full" aria-label="Add an image or video">
                 <EmptyMedia />
               </button>
             )}
+            <SketchLayer strokes={frame.sketch} aspect={aspectValue(s.meta.aspect)} />
           </div>
+          {frame.sketch.length > 0 && (
+            <p className="flex items-center gap-1 text-[11px] text-fg-3">
+              Sketch: {describeSketch(frame.sketch)}.
+              <button type="button" onClick={() => project.clearSketch(frameId)} className="font-medium text-fg-2 hover:text-fg hover:underline">
+                Clear
+              </button>
+            </p>
+          )}
           {frame.media.length > 1 && (
             <div className="grid grid-cols-5 gap-1.5">
               {[...frame.media].reverse().map((version, i) => {

@@ -116,7 +116,7 @@ describe('Claude through MCP', () => {
       expect(names).toContain(name)
     }
     const { prompts } = await claude.listPrompts()
-    expect(prompts.map((p) => p.name)).toEqual(expect.arrayContaining(['board_script', 'image_prompts', 'fit_cut', 'review_board']))
+    expect(prompts.map((p) => p.name)).toEqual(expect.arrayContaining(['board_script', 'image_prompts', 'video_prompts', 'fit_cut', 'review_board']))
   })
 
   it('reads projects by title', async () => {
