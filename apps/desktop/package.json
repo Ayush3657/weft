@@ -1,6 +1,6 @@
 {
   "name": "weft-desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Weft as a desktop app: its own server, with the projects on this computer, working offline.",
   "type": "module",

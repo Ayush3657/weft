@@ -37,7 +37,7 @@ To make the installer, run this in the Weft folder (the first time takes a few m
 npm run desktop:installer
 ```
 
-The installer is `apps\desktop\release\Weft-Setup-0.1.0.exe`; teammates can install from the same file. It isn't signed yet, so Windows warns about it: choose **More info**, then **Run anyway**. It installs in your user folder (no admin needed) with a Start menu and desktop shortcut, and uninstalling leaves the projects where they are. To try the app without installing it, run `npm run desktop`.
+The installer is `apps\desktop\release\Weft-Setup-1.0.0.exe`; teammates can install from the same file. It isn't signed yet, so Windows warns about it: choose **More info**, then **Run anyway**. It installs in your user folder (no admin needed) with a Start menu and desktop shortcut, and uninstalling leaves the projects where they are. To try the app without installing it, run `npm run desktop`.
 
 - **The first time**, Weft asks where to keep projects. To carry on with the projects you have, choose this folder's `apps\server\data`, and close Start Weft.cmd first: only one Weft can use a data folder at a time, and a second one says so.
 - **This computer…** in your account menu shows where the projects are kept and changes that, and has **Open Weft to your team on this network**, which does what Start Weft for the team.cmd does. Teammates open the address it shows. Windows may ask whether Weft can use the network: allow it on private networks.
