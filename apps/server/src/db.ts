@@ -3,11 +3,28 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { config } from './config'
+import { log } from './log'
 
 mkdirSync(config.dataDir, { recursive: true })
 
+/** How the server exits when another Weft has its data folder open (the desktop app looks for it). */
+export const DATA_IN_USE = 3
+
 export const db = new Database(path.join(config.dataDir, 'weft.db'))
-db.pragma('journal_mode = WAL')
+// One Weft at a time on a data folder: two would overwrite each other's work.
+// This server holds the database for as long as it runs, and lets go when it stops, however it stops.
+// (It waits a moment first, for a copy that's just stopping, as when the dev server restarts.)
+db.pragma('busy_timeout = 3000')
+db.pragma('locking_mode = EXCLUSIVE')
+try {
+  db.pragma('journal_mode = WAL')
+  db.exec('BEGIN EXCLUSIVE; COMMIT')
+} catch (error) {
+  if ((error as { code?: string }).code !== 'SQLITE_BUSY') throw error
+  log.error(`Another copy of Weft is using the data folder ${config.dataDir}. Close it first, or give this one a different folder.`)
+  process.exit(DATA_IN_USE)
+}
+db.pragma('busy_timeout = 5000')
 db.pragma('foreign_keys = ON')
 
 db.exec(`

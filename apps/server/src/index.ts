@@ -28,3 +28,11 @@ async function shutdown(signal: string) {
 }
 process.on('SIGINT', () => void shutdown('SIGINT'))
 process.on('SIGTERM', () => void shutdown('SIGTERM'))
+
+// In the desktop app, this server runs in a process of the app's, which says when it's up and is told when to stop.
+type ParentPort = { on(event: 'message', listener: (event: { data: unknown }) => void): void; postMessage(message: unknown): void }
+const parentPort = (process as NodeJS.Process & { parentPort?: ParentPort }).parentPort
+parentPort?.on('message', (event) => {
+  if (event.data === 'stop') void shutdown('The app is closing')
+})
+parentPort?.postMessage({ ready: true, port: running.port, teamUrl: config.teamUrl })

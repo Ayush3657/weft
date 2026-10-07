@@ -1,10 +1,14 @@
 import { strToU8, zipSync } from 'fflate'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from './config'
 
-const ICON = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/public/icons/weft-512.png')
+/** Weft's icon: in the built web app (the desktop app has only that), else in its source. */
+const icon = () => {
+  const built = path.join(config.webDist, 'icons', 'weft-512.png')
+  return existsSync(built) ? built : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/public/icons/weft-512.png')
+}
 
 /**
  * "Weft for Claude": a Claude Desktop extension (an .mcpb file) holding the
@@ -57,7 +61,7 @@ export function claudeExtension(url: string): Uint8Array {
     {
       'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
       'server/weft-mcp.mjs': readFileSync(config.connectorPath),
-      'icon.png': [readFileSync(ICON), { level: 0 }],
+      'icon.png': [readFileSync(icon()), { level: 0 }],
     },
     { level: 6 },
   )

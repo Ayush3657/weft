@@ -522,6 +522,7 @@ app.get('/api/connect', requireUser, (c) => {
     connectorBuilt: existsSync(config.connectorPath),
     // The Node that runs this server, so Claude Desktop doesn't depend on its PATH.
     nodePath: process.execPath,
+    nodeEnv: config.connectorEnv,
     here: local
       ? {
           available: true,
@@ -554,7 +555,7 @@ app.post('/api/connect/local', requireUser, (c) => {
   for (const t of listAccessTokens(user.id)) if (t.name === LOCAL_KEY_NAME) deleteAccessToken(user.id, t.id)
   const { token } = createAccessToken(user.id, LOCAL_KEY_NAME)
   const keyFile = writeConnectorFile(config.agentUrl, token)
-  const desktop = addToClaudeDesktop(process.execPath, config.connectorPath)
+  const desktop = addToClaudeDesktop(process.execPath, config.connectorPath, config.connectorEnv)
   log.info(`${user.email} connected Claude on this computer`)
   return c.json({ keyFile, desktopFound: claudeDesktopConfigs().length > 0, desktop })
 })

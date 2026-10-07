@@ -4,7 +4,9 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/server",
+    "apps/web",
+    "apps/mcp"
   ],
   "scripts": {
     "predev": "npm run build -w @weft/mcp",
@@ -12,7 +14,9 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build -w @weft/web && npm run build -w @weft/mcp",
-    "app": "npm run build && npm run start -w @weft/server"
+    "app": "npm run build && npm run start -w @weft/server",
+    "desktop": "npm install --prefix apps/desktop --no-audit --no-fund && npm run start --prefix apps/desktop",
+    "desktop:installer": "npm install --prefix apps/desktop --no-audit --no-fund && npm run installer --prefix apps/desktop"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",
