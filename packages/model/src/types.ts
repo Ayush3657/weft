@@ -127,8 +127,9 @@ export interface MediaVersion {
   label: string
 }
 
-export type SketchTool = 'pen' | 'arrow' | 'box'
-export const SKETCH_TOOLS: readonly SketchTool[] = ['pen', 'arrow', 'box']
+/** A line is a plain line through its points: what the eraser leaves of an arrow or a box. */
+export type SketchTool = 'pen' | 'arrow' | 'box' | 'line'
+export const SKETCH_TOOLS: readonly SketchTool[] = ['pen', 'arrow', 'box', 'line']
 
 /** One stroke on a frame's sketch layer, in sketch units: the frame is 1000 wide. */
 export interface SketchStroke {
@@ -138,7 +139,7 @@ export interface SketchStroke {
   color: string
   /** Its width, in sketch units. */
   size: number
-  /** x, y pairs (x, y, pressure triples when drawn with a pen). A box is two corners. */
+  /** x, y pairs (x, y, pressure triples when drawn with a pen, or cut by the eraser). A box is two corners. */
   points: number[]
   /** Every third number is a pen's pressure, 0 to 1. */
   pressure: boolean

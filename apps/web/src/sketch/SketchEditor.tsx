@@ -4,9 +4,10 @@ import {
   SKETCH_WIDTH,
   aspectValue,
   cutTimeline,
+  eraseStroke,
   shotLabels,
-  simplifyPoints,
   sketchHeight,
+  smoothDrawn,
   strokeHit,
   type AssetSnapshot,
   type SketchStroke,
@@ -31,11 +32,9 @@ const TOOLS: ReadonlyArray<{ id: Tool; label: string; hint: string; key: string;
   { id: 'pen', label: 'Pen', hint: 'Draw', key: 'P', icon: PenLine },
   { id: 'arrow', label: 'Arrow', hint: 'Camera or subject moves; hold Shift for a straight one', key: 'A', icon: ArrowUpRight },
   { id: 'box', label: 'Box', hint: 'A framing, like where a push-in ends', key: 'B', icon: Square },
-  { id: 'eraser', label: 'Eraser', hint: 'Rub out whole strokes', key: 'E', icon: Eraser },
+  { id: 'eraser', label: 'Eraser', hint: 'Rub out what you go over; hold Shift to take whole strokes', key: 'E', icon: Eraser },
 ]
 const TOOL_IDS = TOOLS.map((t) => t.id)
-/** The eraser's reach, in sketch units. */
-const ERASER = 14
 
 /** The sketch editor, over everything, for whichever frame is being sketched on. */
 export function SketchEditorHost({ cutId }: { cutId: string }) {
@@ -55,9 +54,14 @@ function heroOf(s: ReturnType<typeof useSnapshot>, frameId: string): AssetSnapsh
 
 interface Drawing {
   pointerId: number
+  /** As drawn; for the eraser, just where it last was. */
   points: number[]
   pressure: boolean
   straight: boolean
+  /** How many sketch units a screen pixel is, where it's drawn. */
+  px: number
+  /** The eraser is taking whole strokes, not just what it goes over. */
+  whole: boolean
 }
 
 function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
@@ -105,8 +109,11 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const drawing = useRef<Drawing | null>(null)
   const [draft, setDraft] = useState<SketchStroke | null>(null)
+  // Erasing whole strokes: the ones about to go. Rubbing out: what's left of each stroke the eraser has been over.
   const [erasing, setErasing] = useState<ReadonlySet<string>>(new Set())
-  const [eraserAt, setEraserAt] = useState<{ x: number; y: number } | null>(null)
+  const rubbed = useRef(new Map<string, SketchStroke[]>())
+  const [, setRubbedVersion] = useState(0)
+  const [eraserAt, setEraserAt] = useState<{ x: number; y: number; whole: boolean } | null>(null)
 
   const toSketch = (e: { clientX: number; clientY: number }) => {
     const rect = svgRef.current!.getBoundingClientRect()
@@ -118,13 +125,31 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
     tool: tool as SketchTool,
     color,
     size: width,
-    points: d.points,
+    // Smoothed as it's drawn, the way it'll be kept.
+    points: tool === 'box' ? d.points : smoothDrawn(d.points, d.pressure ? 3 : 2, d.px, false),
     pressure: d.pressure,
     createdBy: null,
     createdAt: 0,
   })
   const hitAt = (x: number, y: number, into: Set<string>) => {
-    for (const stroke of frame.sketch) if (!into.has(stroke.id) && strokeHit(stroke, x, y, ERASER)) into.add(stroke.id)
+    for (const stroke of frame.sketch) if (!into.has(stroke.id) && strokeHit(stroke, x, y, size.eraser)) into.add(stroke.id)
+  }
+  /** Rubs out along part of the eraser's path, keeping what's left of each stroke it touches. */
+  const rub = (path: number[]) => {
+    let changed = false
+    for (const stroke of frame.sketch) {
+      let touched = false
+      const left = (rubbed.current.get(stroke.id) ?? [stroke]).flatMap((piece) => {
+        const after = eraseStroke(piece, path, size.eraser)
+        if (after) touched = true
+        return after ?? [piece]
+      })
+      if (touched) {
+        rubbed.current.set(stroke.id, left)
+        changed = true
+      }
+    }
+    if (changed) setRubbedVersion((v) => v + 1)
   }
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -132,34 +157,51 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     const { x, y } = toSketch(e)
+    const px = SKETCH_WIDTH / svgRef.current!.getBoundingClientRect().width
     if (tool === 'eraser') {
-      const hit = new Set<string>()
-      hitAt(x, y, hit)
-      setErasing(hit)
-      drawing.current = { pointerId: e.pointerId, points: [], pressure: false, straight: false }
+      const whole = e.shiftKey
+      drawing.current = { pointerId: e.pointerId, points: [x, y], pressure: false, straight: false, px, whole }
+      if (whole) {
+        const hit = new Set<string>()
+        hitAt(x, y, hit)
+        setErasing(hit)
+      } else {
+        rubbed.current = new Map()
+        rub([x, y])
+      }
       return
     }
-    // A pen's pressure shapes pen strokes; a mouse's speed does.
+    // A pen's pressure shapes pen strokes; a mouse's are shaped like ink.
     const pressure = tool === 'pen' && e.pointerType === 'pen' && e.pressure > 0
-    const d: Drawing = { pointerId: e.pointerId, points: pressure ? [x, y, e.pressure] : [x, y], pressure, straight: tool === 'box' || e.shiftKey }
+    const d: Drawing = { pointerId: e.pointerId, points: pressure ? [x, y, e.pressure] : [x, y], pressure, straight: tool === 'box' || e.shiftKey, px, whole: false }
     drawing.current = d
     setDraft(draftOf(d))
   }
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     const { x, y } = toSketch(e)
-    if (tool === 'eraser') setEraserAt({ x, y })
+    if (tool === 'eraser') setEraserAt({ x, y, whole: drawing.current ? drawing.current.whole : e.shiftKey })
     const d = drawing.current
     if (!d || d.pointerId !== e.pointerId) return
     const events = e.nativeEvent.getCoalescedEvents?.() ?? []
     const moves = events.length ? events : [e.nativeEvent]
     if (tool === 'eraser') {
-      const next = new Set(erasing)
+      if (d.whole) {
+        const next = new Set(erasing)
+        for (const ev of moves) {
+          const p = toSketch(ev)
+          hitAt(p.x, p.y, next)
+        }
+        if (next.size !== erasing.size) setErasing(next)
+        return
+      }
+      const path = [...d.points]
       for (const ev of moves) {
         const p = toSketch(ev)
-        hitAt(p.x, p.y, next)
+        path.push(p.x, p.y)
       }
-      if (next.size !== erasing.size) setErasing(next)
+      d.points = path.slice(-2)
+      rub(path)
       return
     }
     if (d.straight || (tool === 'arrow' && e.shiftKey)) {
@@ -181,10 +223,15 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
     drawing.current = null
     if (tool === 'eraser') {
       const ids = [...erasing]
+      const left = rubbed.current
       setErasing(new Set())
-      if (ids.length) {
+      rubbed.current = new Map()
+      setRubbedVersion((v) => v + 1)
+      // All of it is one step for Ctrl+Z.
+      if (ids.length || left.size) {
         undo.stopCapturing()
-        project.removeStrokes(frameId, ids)
+        if (ids.length) project.removeStrokes(frameId, ids)
+        if (left.size) project.replaceStrokes(frameId, left)
         undo.stopCapturing()
       }
       return
@@ -197,7 +244,7 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
       if (Math.abs(x2 - x1) < 6 || Math.abs(y2 - y1) < 6) return
       points = [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)]
     } else {
-      points = simplifyPoints(points, d.pressure ? 3 : 2, tool === 'pen' ? 0.35 : 1.2)
+      points = smoothDrawn(points, d.pressure ? 3 : 2, d.px)
       // A click isn't an arrow.
       if (tool === 'arrow' && (points.length < 4 || Math.hypot(points[points.length - 2]! - points[0]!, points[points.length - 1]! - points[1]!) < 12)) return
     }
@@ -211,6 +258,8 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
     drawing.current = null
     setDraft(null)
     setErasing(new Set())
+    rubbed.current = new Map()
+    setRubbedVersion((v) => v + 1)
   }
 
   const clear = () => {
@@ -285,12 +334,22 @@ function SketchEditor({ frameId, cutId }: { frameId: string; cutId: string }) {
             onPointerCancel={onPointerCancel}
             onPointerLeave={() => setEraserAt(null)}
           >
-            {frame.sketch.map((stroke) => (
-              <StrokePaths key={stroke.id} stroke={stroke} faded={erasing.has(stroke.id)} />
-            ))}
+            {frame.sketch
+              .flatMap((stroke) => rubbed.current.get(stroke.id) ?? [stroke])
+              .map((stroke) => (
+                <StrokePaths key={stroke.id} stroke={stroke} faded={erasing.has(stroke.id)} />
+              ))}
             {draft && <StrokePaths stroke={draft} />}
             {tool === 'eraser' && eraserAt && (
-              <circle cx={eraserAt.x} cy={eraserAt.y} r={ERASER} fill="rgb(255 255 255 / 0.2)" stroke="#888" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+              <circle
+                cx={eraserAt.x}
+                cy={eraserAt.y}
+                r={size.eraser}
+                fill={eraserAt.whole ? 'rgb(229 72 77 / 0.15)' : 'rgb(255 255 255 / 0.2)'}
+                stroke={eraserAt.whole ? '#e5484d' : '#888'}
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
             )}
           </svg>
         </div>
