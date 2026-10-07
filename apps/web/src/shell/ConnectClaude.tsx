@@ -14,6 +14,8 @@ interface Setup {
   connectorPath: string
   connectorBuilt: boolean
   nodePath: string
+  /** What the connector needs set to run with that Node (the desktop app's). */
+  nodeEnv: Record<string, string> | null
   here: { available: false } | { available: true; connected: boolean; desktopFound: boolean; desktopHasWeft: boolean }
 }
 
@@ -186,7 +188,10 @@ function HereSetup({
   onConnect: () => void
   onDisconnect: () => void
 }) {
-  const code = `claude mcp add weft --scope user -- "${setup.nodePath}" "${setup.connectorPath}"`
+  const env = Object.entries(setup.nodeEnv ?? {})
+    .map(([name, value]) => ` -e ${name}=${value}`)
+    .join('')
+  const code = `claude mcp add weft --scope user${env} -- "${setup.nodePath}" "${setup.connectorPath}"`
   return (
     <div className="flex flex-col gap-4">
       <section className="flex items-start gap-3 rounded-xl border border-line bg-bg p-4">

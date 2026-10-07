@@ -1,0 +1,33 @@
+# The Windows installer for Weft's desktop app. Build it with `npm run desktop:installer` in the Weft folder.
+appId: app.weft.desktop
+productName: Weft
+copyright: Weft
+directories:
+  app: build/app
+  output: release
+  buildResources: build/resources
+# Plain files rather than an archive: the server, its native modules and Claude's connector run from them.
+asar: false
+# The native modules (SQLite, sharp) use Node's stable interface, so Electron runs them as they come.
+npmRebuild: false
+nodeGypRebuild: false
+files:
+  - '**/*'
+# Weft's own words are in English; the browser's other languages would only add size.
+electronLanguages:
+  - en-US
+  - en-GB
+win:
+  target: nsis
+  icon: build/resources/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Weft
+  uninstallDisplayName: Weft
+  artifactName: Weft-Setup-${version}.exe
+  # Uninstalling leaves the projects alone.
+  deleteAppDataOnUninstall: false

@@ -27,6 +27,23 @@ npm run app
 
 Then open http://localhost:8787. In Chrome or Edge you can install it as an app (the install icon in the address bar), which gives Weft its own window and taskbar icon.
 
+## The desktop app
+
+Weft also comes as a Windows app that has everything it needs inside: no Node, no terminal and no browser, and it works without a network. Its projects are kept on the computer it runs on.
+
+To make the installer, run this in the Weft folder (the first time takes a few minutes, to download Electron):
+
+```bash
+npm run desktop:installer
+```
+
+The installer is `apps\desktop\release\Weft-Setup-1.0.0.exe`; teammates can install from the same file. It isn't signed yet, so Windows warns about it: choose **More info**, then **Run anyway**. It installs in your user folder (no admin needed) with a Start menu and desktop shortcut, and uninstalling leaves the projects where they are. To try the app without installing it, run `npm run desktop`.
+
+- **The first time**, Weft asks where to keep projects. To carry on with the projects you have, choose this folder's `apps\server\data`, and close Start Weft.cmd first: only one Weft can use a data folder at a time, and a second one says so.
+- **This computer…** in your account menu shows where the projects are kept and changes that, and has **Open Weft to your team on this network**, which does what Start Weft for the team.cmd does. Teammates open the address it shows. Windows may ask whether Weft can use the network: allow it on private networks.
+- Sign in, connect Claude and keep a copy in a vault as in the browser (the app has its own sign-in and vault settings, so do these once in it). Claude runs Weft's connector with the app itself, so it needs no Node either.
+- `Ctrl+R` reloads, `Ctrl+=`, `Ctrl+-` and `Ctrl+0` zoom, and `F11` is full screen.
+
 ## Spaces, folders and libraries
 
 The projects page has a sidebar of **spaces**: **Personal** (only you see it) and team spaces, which you share by adding people (their email; anyone who hasn't signed in yet joins when they do). Projects that existed before spaces were moved into a team space called **Team**, with everyone who had signed in; rename it from its menu.
@@ -130,6 +147,7 @@ npm run typecheck
 | `apps/server` | HTTP API (`/api`), live sync (`/sync`, Hocuspocus), media storage, link previews, and the MCP endpoint for Claude (`/mcp`). SQLite database in `apps/server/data/`. |
 | `apps/mcp` | The connector Claude Desktop runs: passes MCP through to the server and uploads files from your computer. |
 | `apps/web` | The React app: projects list and the Write, Board and Play workspaces. |
+| `apps/desktop` | The desktop app (Electron): runs the server in a process of its own and shows the web app in a window. Its own npm project, so the rest of Weft doesn't download Electron. |
 
 ## Data
 

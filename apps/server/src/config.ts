@@ -59,7 +59,8 @@ export const config = {
   publicUrl,
   secureCookies: publicUrl.startsWith('https://'),
   dataDir: path.resolve(serverRoot, env.DATA_DIR ?? 'data'),
-  webDist: path.resolve(serverRoot, '../web/dist'),
+  /** The built web app, served from here when it's there. The desktop app brings its own. */
+  webDist: env.WEB_DIST ? path.resolve(env.WEB_DIST) : path.resolve(serverRoot, '../web/dist'),
   /** Sign in with just a name and email. For local testing only. */
   devLogin: flag(env.DEV_LOGIN, !production),
   allowedDomains: list(env.ALLOWED_EMAIL_DOMAINS),
@@ -79,8 +80,13 @@ export const config = {
   appUrl: (env.APP_URL ?? (production ? publicUrl : appMode ? (teamUrl ?? `http://localhost:${port}`) : 'http://localhost:5173')).replace(/\/+$/, ''),
   /** Where Claude's MCP connector reaches this server (the API itself, not the web dev server). */
   agentUrl: (env.WEFT_AGENT_URL ?? (production ? publicUrl : `http://127.0.0.1:${port}`)).replace(/\/+$/, ''),
-  /** The connector Claude Desktop runs; built with `npm run build -w @weft/mcp`. */
-  connectorPath: path.resolve(serverRoot, '../mcp/dist/weft-mcp.mjs'),
+  /** The connector Claude Desktop runs; built with `npm run build -w @weft/mcp` (the desktop app brings its own). */
+  connectorPath: env.WEFT_CONNECTOR ? path.resolve(env.WEFT_CONNECTOR) : path.resolve(serverRoot, '../mcp/dist/weft-mcp.mjs'),
+  /**
+   * In the desktop app, the Node that runs this server is the app itself,
+   * which acts as Node for the connector only when told to.
+   */
+  connectorEnv: process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : null,
   sessionDays: 30,
 }
 

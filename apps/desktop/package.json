@@ -1,0 +1,17 @@
+{
+  "name": "weft-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Weft as a desktop app: its own server, with the projects on this computer, working offline.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && electron build/app",
+    "installer": "node build.mjs --installer",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "electron": "44.6.0",
+    "electron-builder": "^26.15.3"
+  }
+}

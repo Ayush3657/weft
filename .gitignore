@@ -8,6 +8,10 @@ coverage/
 # Runtime data written by the local server (projects, media, database)
 apps/server/data/
 
+# The desktop app as built, and its installers
+apps/desktop/build/
+apps/desktop/release/
+
 # Editors and OS
 .vscode/*
 !.vscode/extensions.json

@@ -88,10 +88,10 @@ function editConfigs(change: (servers: Record<string, unknown>) => void): Config
   return result
 }
 
-/** Adds Weft to Claude Desktop's MCP servers: it runs the connector with this Node. */
-export const addToClaudeDesktop = (command: string, connector: string): ConfigChange =>
+/** Adds Weft to Claude Desktop's MCP servers: it runs the connector with this Node (with `env`, if it needs any). */
+export const addToClaudeDesktop = (command: string, connector: string, env?: Record<string, string> | null): ConfigChange =>
   editConfigs((servers) => {
-    servers.weft = { command, args: [connector] }
+    servers.weft = { command, args: [connector], ...(env ? { env } : {}) }
   })
 
 export const removeFromClaudeDesktop = (): ConfigChange =>

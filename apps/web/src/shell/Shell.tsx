@@ -1,11 +1,13 @@
-import { LogOut, Moon, Sparkles, Sun } from 'lucide-react'
+import { LogOut, Monitor, Moon, Sparkles, Sun } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { useAuth, useUser } from '../lib/auth'
 import { cx } from '../lib/cx'
+import { desktop } from '../lib/desktop'
 import { useTheme } from '../lib/prefs'
 import { navigate } from '../lib/router'
 import { Avatar, Menu } from '../ui'
 import { ConnectClaude } from './ConnectClaude'
+import { DesktopSettings } from './DesktopSettings'
 
 export function LogoMark({ size = 22 }: { size?: number }) {
   return (
@@ -44,6 +46,7 @@ export function UserMenu() {
   const { signOut } = useAuth()
   const [theme, setTheme] = useTheme()
   const [connecting, setConnecting] = useState(false)
+  const [computer, setComputer] = useState(false)
   return (
     <>
       <Menu
@@ -60,6 +63,7 @@ export function UserMenu() {
         }
         items={[
           { label: 'Connect Claude…', icon: <Sparkles size={14} />, onSelect: () => setConnecting(true) },
+          ...(desktop ? [{ label: 'This computer…', icon: <Monitor size={14} />, onSelect: () => setComputer(true) }] : []),
           {
             label: theme === 'dark' ? 'Light theme' : 'Dark theme',
             icon: theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />,
@@ -70,6 +74,7 @@ export function UserMenu() {
         ]}
       />
       <ConnectClaude open={connecting} onOpenChange={setConnecting} />
+      <DesktopSettings open={computer} onOpenChange={setComputer} />
     </>
   )
 }

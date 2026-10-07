@@ -153,7 +153,7 @@ Start times, timecodes, and totals are always calculated per cut, never typed.
 - Paste links to get preview cards.
 - Grab a still from any video asset at the playhead.
 
-**Watch folders (v1.5, needs the desktop companion).** Watch a folder such as Blender's render output or Photoshop's exports. Files named after a shot (`3.2A.png`, `sc03_sh02.png`) attach to that frame as a new version automatically, and re-exporting updates the frame.
+**Watch folders (v1.5, in the desktop app).** Watch a folder such as Blender's render output or Photoshop's exports. Files named after a shot (`3.2A.png`, `sc03_sh02.png`) attach to that frame as a new version automatically, and re-exporting updates the frame.
 
 **Sketch layer (v1, kept minimal).** Drawing with a mouse or a pen, with pen pressure on tablets: a pen, arrows for camera and subject movement, boxes for framing, an eraser that rubs out just what it passes over (or whole strokes, with Shift), six colors and three sizes. Lines are smoothed as they're drawn. You draw on a separate layer over the frame's picture (full or faded) or on paper when there's no picture yet, and each stroke is one undo step. The sketch shows on board cards, in the inspector, in Play (with a toggle) and on thumbnails. Claude sees it with the picture. The vault keeps each sketch as an SVG, and exports flatten it over the picture.
 
@@ -199,7 +199,9 @@ The vault keeps every storyboard in the spaces you choose, not just the ones you
 
 **How the vault gets written:**
 - **v1.** In Chrome or Edge, the web app writes directly to a folder you choose, with no install. It syncs while the app is open and catches up when you reopen it.
-- **v1.5.** A desktop companion app keeps the vault synced in the background. It also adds watch folders, lets Claude reach local-only projects through MCP, and in v2 bridges to ComfyUI.
+- **v1.5.** The desktop app keeps the vault synced in the background. It also adds watch folders, lets Claude reach local-only projects through MCP, and in v2 bridges to ComfyUI.
+
+**The desktop app (built 2026-10-07).** Weft for Windows runs the same server and web app inside an Electron app, with the projects in a data folder on that computer, so it works with no network and needs nothing else installed. It can open itself to the team's network (what the team server does today), and Claude's connector runs with the app acting as Node. Only one Weft can have a data folder open at a time. The background vault, watch folders and local-only projects build on it.
 
 **Security:**
 - Team sign-in with Google or Microsoft (Outlook) accounts, limited to allowed email addresses or domains. Project roles are enforced on the server.
@@ -256,7 +258,7 @@ Two people can already edit the same project live in v1, because of the sync eng
 
 **With the Blender MCP.** In the same chat, Claude can render a Blender camera view and attach it to a frame.
 
-In v1, MCP reaches Cloud and Both projects through the team server. Local-only projects need the desktop companion (v1.5).
+In v1, MCP reaches Cloud and Both projects through the team server. Local-only projects need the desktop app (v1.5).
 
 ### v1: video prompts
 
@@ -276,7 +278,7 @@ A frame already holds what a video model needs, so Weft writes the prompt for on
 
 ### v2: generation
 
-**Images.** Qwen Image and Flux, run through ComfyUI on your machine (via the desktop companion) or through cloud APIs.
+**Images.** Qwen Image and Flux, run through ComfyUI on your machine (via the desktop app) or through cloud APIs.
 - The prompt is built from the description, camera, @tagged bible entries, style, and reference images.
 - You can edit the prompt and generate several options.
 - The option you pick becomes a new media version.
@@ -319,7 +321,7 @@ A frame already holds what a video model needs, so Weft writes the prompt for on
 ### v1.5: film and pipeline
 
 - Screenplay mode, scene breakdown, locked numbering
-- Desktop companion: background vault sync, watch folders, auto-attach by filename
+- Desktop app: built (Windows, offline, with its own server and team sharing). Still to come in it: background vault sync, watch folders, auto-attach by filename
 - MP4 export
 - Performance and navigation polish for 300+ shot projects
 
@@ -346,7 +348,7 @@ A frame already holds what a video model needs, so Weft writes the prompt for on
 | Storage | Postgres or SQLite for data; S3-compatible storage (R2 or MinIO) for media |
 | Player | Custom (Canvas + Web Audio); ffmpeg for MP4 export |
 | MCP | TypeScript MCP SDK, packaged as a Claude Desktop Extension |
-| Desktop companion | Electron or Tauri (decide in v1.5) |
+| Desktop app | Electron, running the same server and web app (decided 2026-10-07) |
 
 Remotion would speed up the player and export, but companies need a paid license for it, so start with a custom player.
 
@@ -369,5 +371,6 @@ Remotion would speed up the player and export, but companies need a paid license
 | Name | Weft (working name) |
 | UI design | Designed in code and reviewed in the browser; Figma later for the public launch |
 | Sketch layer | Mouse and pen drawing in v1, with pen pressure (moved up from v2 on 2026-10-07) |
+| Desktop app | Electron, with the server inside and the projects on that computer; works offline (2026-10-07) |
 
 Hosting note: Google and Microsoft sign-in need an HTTPS address. Google won't redirect to a plain LAN IP address. While the server runs on the dev PC, teammates will reach it through a tunnel with an HTTPS domain, or use dev sign-in on the local network until we move to AWS.
