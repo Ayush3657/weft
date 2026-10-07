@@ -7,6 +7,7 @@ import { createMiddleware } from 'hono/factory'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
+import * as Y from 'yjs'
 import { z } from 'zod'
 import {
   SESSION_COOKIE,
@@ -41,7 +42,7 @@ import { log } from './log'
 import { HASH_PATTERN, UploadError, getMedia, mediaResponse, storeMedia } from './media'
 import { PREVIEW_SIZES, mediaPreview, warmPreviews, type PreviewSize } from './previews'
 import { addLibraryItem, deleteLibraryItem, libraryAt, libraryChain, libraryCounts, updateLibraryItem } from './library'
-import { ImportError, createProject, docName, importProject, listProjects, softDeleteProject, summaryOf } from './projects'
+import { ImportError, createProject, docName, importProject, listProjects, loadProjectState, softDeleteProject, summaryOf } from './projects'
 import {
   AccessError,
   addMember,
@@ -202,6 +203,20 @@ app.patch('/api/projects/:id', requireUser, async (c) => {
   if (!input) return c.json({ error: 'Say where to move it' }, 400)
   moveProject(c.req.param('id'), currentUser(c).id, input)
   return c.json({ project: summaryOf(c.req.param('id')) })
+})
+
+/**
+ * A project's whole state, as a project folder's project.sync holds it, so a
+ * browser can keep a copy on its computer without opening the project.
+ */
+app.get('/api/projects/:id/state', requireUser, (c) => {
+  const id = c.req.param('id')
+  projectFor(id, currentUser(c).id)
+  // The live copy if someone has it open (the saved one can be a few seconds behind).
+  const live = hocuspocus.documents.get(docName(id))
+  const state = live ? Y.encodeStateAsUpdate(live) : loadProjectState(id)
+  if (!state) return c.json({ error: 'Project not found' }, 404)
+  return new Response(new Uint8Array(state), { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' } })
 })
 
 /** What a project can draw on: the libraries of its space and of each folder down to its own. */

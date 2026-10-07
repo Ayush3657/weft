@@ -68,6 +68,26 @@ describe('opening a project folder', () => {
     expect(again.json.existed).toBe(true)
   })
 
+  it('brings back a project deleted here, under its own id, with what the folder adds', async () => {
+    const made = await fetch(`${base}/api/projects`, {
+      method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Brought back', type: 'ad' }),
+    }).then((r) => r.json() as Promise<{ project: { id: string } }>)
+    const id = made.project.id
+    // The folder's copy: the server's state, plus an edit made elsewhere.
+    const copy = new Y.Doc()
+    Y.applyUpdate(copy, loadProjectState(id)!)
+    new Project(copy).updateMeta({ title: 'Brought back, edited' })
+    await fetch(`${base}/api/projects/${id}`, { method: 'DELETE', headers: { cookie, origin } })
+
+    const back = await importState(Y.encodeStateAsUpdate(copy), id)
+    expect(back.status).toBe(201)
+    expect(back.json).toMatchObject({ project: { id, title: 'Brought back, edited' }, existed: false, restored: true })
+    const list = await fetch(`${base}/api/projects`, { headers: { cookie } }).then((r) => r.json() as Promise<{ projects: Array<{ id: string }> }>)
+    expect(list.projects.some((p) => p.id === id)).toBe(true)
+  })
+
   it('gives a new id when there is none, and refuses files that are not projects', async () => {
     const doc = new Y.Doc()
     initProject(doc, { title: 'No id' })

@@ -1,7 +1,7 @@
 import { PROJECT_TYPES, initProject, newId, readMeta, type AspectRatio, type ProjectType } from '@weft/model'
 import * as Y from 'yjs'
 import { db, type ProjectRow } from './db'
-import { AccessError, canSeeProject, type Place } from './spaces'
+import { AccessError, canSeeProject, roleIn, type Place } from './spaces'
 
 const DOC_PREFIX = 'project/'
 
@@ -97,9 +97,15 @@ export class ImportError extends Error {}
  * Adds a project from its saved sync state (a project folder opened in Weft).
  * It keeps its id when that's free, so the same project stays the same project
  * wherever it's opened. If this server already has it, nothing changes and the
- * app merges the folder's copy in instead.
+ * app merges the folder's copy in instead. One deleted here from a space you're
+ * in comes back, with what the folder adds.
  */
-export function importProject(userId: string, state: Uint8Array, wantedId: string | null, place: Place): { project: ProjectSummary; existed: boolean } {
+export function importProject(
+  userId: string,
+  state: Uint8Array,
+  wantedId: string | null,
+  place: Place,
+): { project: ProjectSummary; existed: boolean; restored?: boolean } {
   const validId = wantedId && /^[A-Za-z0-9]{6,32}$/.test(wantedId) ? wantedId : null
   const existing = validId ? getProject(validId) : null
   if (existing && !existing.deleted_at) {
@@ -118,9 +124,33 @@ export function importProject(userId: string, state: Uint8Array, wantedId: strin
   doc.destroy()
   if (!isProject) throw new ImportError("That file isn't a Weft project")
 
-  const id = validId && !existing ? validId : newId()
   const type: ProjectType = (PROJECT_TYPES as readonly string[]).includes(meta.type) ? meta.type : 'other'
   const now = Date.now()
+
+  if (existing?.deleted_at && roleIn(existing.space_id, userId)) {
+    const saved = loadProjectState(existing.id)
+    const merged = saved ? Y.mergeUpdates([saved, state]) : state
+    const back = new Y.Doc()
+    Y.applyUpdate(back, merged)
+    const title = readMeta(back.getMap('meta')).title || existing.title
+    back.destroy()
+    db.transaction(() => {
+      db.prepare('UPDATE projects SET deleted_at = NULL, title = ?, type = ?, space_id = ?, folder_id = ?, updated_at = ? WHERE id = ?').run(
+        title,
+        type,
+        place.spaceId,
+        place.folderId,
+        now,
+        existing.id,
+      )
+      db.prepare(
+        'INSERT INTO project_docs (project_id, state, updated_at) VALUES (?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at',
+      ).run(existing.id, Buffer.from(merged), now)
+    })()
+    return { project: summaryOf(existing.id), existed: false, restored: true }
+  }
+
+  const id = validId && !existing ? validId : newId()
   db.transaction(() => {
     db.prepare('INSERT INTO projects (id, title, type, created_by, created_at, updated_at, space_id, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
       id,

@@ -48,7 +48,7 @@ import {
   within,
 } from '../spaces/store'
 import { Button, Field, IconButton, Input, Menu, Modal, Segmented, Spinner } from '../ui'
-import { OpenFolderButton, VaultPanel } from '../vault/VaultPanel'
+import { OpenFolderButton, VaultSettings } from '../vault/VaultPanel'
 
 const TYPE_LABELS: Record<ProjectType, string> = { ad: 'Ad', film: 'Short film', other: 'Other' }
 const TYPE_ICONS = { ad: Sparkles, film: Film, other: Clapperboard }
@@ -776,15 +776,12 @@ function StoryboardCard({ project, path, onMove, onDelete }: { project: ProjectS
   )
 }
 
-/** The vault (a copy of every project on this computer), in a dialog. */
+/** The vault (a copy of every storyboard on this computer), in a dialog. */
 function VaultDialog({ onOpenChange, place }: { onOpenChange: (open: boolean) => void; place?: Place }) {
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
-  useEffect(() => {
-    api<{ projects: ProjectSummary[] }>('/api/projects').then((r) => setProjects(r.projects), toastError)
-  }, [])
+  const spaces = useSpaces()
   return (
-    <Modal open onOpenChange={onOpenChange} width={640} title="Keep a copy on this computer">
-      <VaultPanel projects={projects} place={place} />
+    <Modal open onOpenChange={onOpenChange} width={600} title="Keep a copy on this computer">
+      <VaultSettings spaces={spaces ?? []} place={place} />
     </Modal>
   )
 }

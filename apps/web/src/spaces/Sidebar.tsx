@@ -1,12 +1,13 @@
 import { ChevronDown, ChevronRight, Folder, FolderInput, FolderPlus, HardDrive, Lock, Pencil, Plus, Trash2, Users } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import type { FolderInfo, SpaceContents, SpaceSummary } from '../lib/api'
 import { cx } from '../lib/cx'
 import { usePref } from '../lib/prefs'
 import { navigate, spacePath } from '../lib/router'
 import { ContextMenuArea, IconButton, type MenuItem } from '../ui'
 import { vaultSupported } from '../vault/fs'
-import { getVault, useVaultVersion } from '../vault/vault'
+import { useKeeperStatus } from '../vault/keeper'
+import { Status, useVaultName } from '../vault/VaultPanel'
 import { startMoveDrag, useMoveTarget, type Dragged } from './dnd'
 import { ancestors, childrenOf, countIn } from './store'
 
@@ -235,25 +236,20 @@ function FolderRow({
 }
 
 function VaultEntry({ onClick }: { onClick: () => void }) {
-  const version = useVaultVersion()
-  const [name, setName] = useState<string | null | undefined>(undefined)
-  useEffect(() => {
-    if (!vaultSupported()) return
-    let stale = false
-    void getVault().then((v) => !stale && setName(v?.name ?? null))
-    return () => {
-      stale = true
-    }
-  }, [version])
+  const name = useVaultName()
+  const status = useKeeperStatus()
   if (!vaultSupported() || name === undefined) return null
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex h-11 shrink-0 items-center gap-2.5 border-t border-line px-4 text-left text-[12px] text-fg-2 hover:bg-hover hover:text-fg"
+      className="flex shrink-0 items-start gap-2.5 border-t border-line px-4 py-2.5 text-left text-[12px] text-fg-2 hover:bg-hover hover:text-fg"
     >
-      <HardDrive size={14} className="shrink-0 text-fg-3" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{name ? `Vault: ${name}` : 'Keep a copy on this computer…'}</span>
+      <HardDrive size={14} className={cx('mt-0.5 shrink-0', status.kind === 'needs-permission' ? 'text-warn' : 'text-fg-3')} aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{name ? `Vault: ${name}` : 'Keep a copy on this computer…'}</span>
+        {name && <Status className="text-[11px]" />}
+      </span>
     </button>
   )
 }

@@ -7,7 +7,7 @@ import { projectFolder, useVaultVersion } from './vault'
 export type VaultView =
   | { kind: 'unsupported' }
   | { kind: 'loading' }
-  | { kind: 'none'; hasVault: boolean; off: boolean }
+  | { kind: 'none'; hasVault: boolean; off: boolean; notKept?: boolean }
   /** The browser needs a click before Weft may use the vault again (after a restart, say). */
   | { kind: 'needs-permission'; label: string; reconnect: () => Promise<void> }
   | { kind: 'mirror'; label: string; inVault: boolean; state: MirrorState; mirror: VaultMirror }
@@ -25,7 +25,7 @@ export function useProjectVault(): VaultView {
     let cancelled = false
     let mirror: VaultMirror | null = null
     let unsubscribe = () => {}
-    projectFolder(projectId, project.getMeta().title)
+    projectFolder(projectId)
       .then((where) => {
         if (cancelled) return
         if (where.kind === 'none') {
@@ -42,7 +42,7 @@ export function useProjectVault(): VaultView {
           })
           return
         }
-        const m = new VaultMirror(doc, project, projectId, where.dir, where.adopt)
+        const m = new VaultMirror(doc, project, projectId, where.dir, where.adopt, where.place, where.relocate)
         mirror = m
         const show = () => setView({ kind: 'mirror', label: where.label, inVault: where.inVault, state: m.getState(), mirror: m })
         unsubscribe = m.subscribe(show)
